@@ -1,0 +1,5 @@
+create_auto_cheat_link.sh
+*.zip
+.venv
+.pytest_cache
+__pycache__
