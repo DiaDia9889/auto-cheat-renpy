@@ -12,7 +12,7 @@ init python:
     # CONFIGURATION
     # =========================================================================
     DEBUG_MODE = True
-    DISCOVER_USED_VARIABLES = False  # Set to True to discover variables from $ assignments
+    DISCOVER_USED_VARIABLES = False
     FONT_SIZE_MODIFIER = -4
 
     # =========================================================================
@@ -109,18 +109,24 @@ init python:
     CONFIG_PATH = os.path.join(config.gamedir, "auto_cheat_config.json")
 
     # =========================================================================
-    # COMPILED REGEX (определены рано, т.к. используются в discover_*)
+    # COMPILED REGEX
     # =========================================================================
     CHOICE_PATTERN = re.compile(r'(?:"([^"]+)"|\'([^\']+)\')\s*(?:if\s+[^:]+)?\s*:')
     CALC_PATTERN = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*([\+\-]?)=\s*([0-9\.]+)')
     TAG_PATTERN = re.compile(r'\{[^}]*\}')
 
     # =========================================================================
-    # RPA ARCHIVE EXTRACTION (OPTIMIZED)
+    # RPA ARCHIVE EXTRACTION
     # =========================================================================
     def extract_rpa_scripts_only():
-        """Извлекает только .rpy скрипты из .rpa архивов."""
+        """Извлекает только .rpy скрипты из .rpa архивов прямо в game/.
+        
+        Файлы сохраняются с оригинальными путями из архива.
+        Если файл уже существует в game/, он НЕ перезаписывается.
+        Ren'Py автоматически будет использовать эти файлы вместо архивных.
+        """
         extracted_count = 0
+        skipped_count = 0
         
         for root, dirs, files in os.walk(config.gamedir):
             if 'tl' in root or 'cache' in root:
@@ -129,86 +135,142 @@ init python:
             for file in files:
                 if file.endswith('.rpa'):
                     rpa_path = os.path.join(root, file)
-                    extract_dir = os.path.join(root, 'scripts_' + file.replace('.rpa', ''))
-                    
-                    # Проверяем, уже ли распаковано
-                    if os.path.exists(extract_dir):
-                        write_discovery_log("[RPA] Scripts from {} already extracted".format(file))
-                        continue
                     
                     write_discovery_log("[RPA] Extracting .rpy scripts from: {}".format(file))
                     
                     try:
                         with open(rpa_path, 'rb') as f:
-                            # Читаем заголовок
-                            header = f.read(4)
-                            if header != b'RPA-':
-                                write_discovery_log("[RPA] Invalid RPA header in {}".format(file))
-                                continue
+                            # Читаем первые 7 байт для определения версии
+                            magic = f.read(7).decode('ascii', errors='ignore')
                             
-                            # Читаем версию
-                            version = f.read(4).decode('ascii').strip()
+                            index_offset = 0
+                            xor_key = 0
+                            version = ""
                             
-                            # Читаем длину индекса
-                            index_len_data = f.read(4)
-                            index_len = struct.unpack('<I', index_len_data)[0]
-                            
-                            # Читаем индекс
-                            index_data = f.read(index_len)
-                            
-                            # Десериализуем индекс (pickle)
-                            try:
-                                index = pickle.loads(index_data)
-                            except:
-                                # Попробуем с фиксированными протоколами
-                                for protocol in [0, 1, 2]:
-                                    try:
-                                        index = pickle.loads(index_data, encoding='bytes')
-                                        break
-                                    except:
-                                        continue
-                                else:
-                                    write_discovery_log("[RPA] Failed to parse index in {}".format(file))
+                            if magic == 'RPA-3.0':
+                                version = '3.0'
+                                # Формат: 'RPA-3.0 ' + offset (16 hex) + ' ' + key (8 hex) + '\n'
+                                f.read(1)  # пробел
+                                offset_hex = f.read(16).decode('ascii')
+                                f.read(1)  # пробел
+                                key_hex = f.read(8).decode('ascii')
+                                f.read(1)  # '\n'
+                                
+                                try:
+                                    index_offset = int(offset_hex, 16)
+                                    xor_key = int(key_hex, 16)
+                                except ValueError as e:
+                                    write_discovery_log("[RPA] Failed to parse offset/key in {}: {}".format(file, e))
+                                    continue
+                                
+                                f.seek(index_offset)
+                                compressed_index = f.read()
+                                
+                                try:
+                                    decompressed = zlib.decompress(compressed_index)
+                                    index = pickle.loads(decompressed)
+                                except Exception as e:
+                                    write_discovery_log("[RPA] Failed to decompress/parse index in {}: {}".format(file, e))
                                     continue
                             
+                            elif magic == 'RPA-2.0':
+                                version = '2.0'
+                                # Формат: 'RPA-2.0 ' + offset (16 hex) + '\n'
+                                f.read(1)  # пробел
+                                offset_hex = f.read(16).decode('ascii')
+                                f.read(1)  # '\n'
+                                
+                                try:
+                                    index_offset = int(offset_hex, 16)
+                                    xor_key = 0
+                                except ValueError as e:
+                                    write_discovery_log("[RPA] Failed to parse offset in {}: {}".format(file, e))
+                                    continue
+                                
+                                f.seek(index_offset)
+                                compressed_index = f.read()
+                                
+                                try:
+                                    decompressed = zlib.decompress(compressed_index)
+                                    index = pickle.loads(decompressed)
+                                except Exception as e:
+                                    write_discovery_log("[RPA] Failed to decompress/parse index in {}: {}".format(file, e))
+                                    continue
+                            
+                            elif magic == 'RPA-1.0':
+                                version = '1.0'
+                                # RPA-1.0: 'RPA-1.0\n' + pickle(index)
+                                f.read(1)  # '\n'
+                                
+                                try:
+                                    index = pickle.loads(f.read())
+                                except Exception as e:
+                                    write_discovery_log("[RPA] Failed to parse index in {}: {}".format(file, e))
+                                    continue
+                            
+                            else:
+                                write_discovery_log("[RPA] Unknown RPA version '{}' in {}".format(magic, file))
+                                continue
+                            
                             # Фильтруем только .rpy файлы
-                            rpy_files = {k: v for k, v in index.items() 
-                                        if isinstance(k, str) and k.endswith('.rpy')}
+                            rpy_files = {}
+                            for k, v in index.items():
+                                key_str = k if isinstance(k, str) else (k.decode('utf-8', errors='replace') if isinstance(k, bytes) else str(k))
+                                if key_str.endswith('.rpy'):
+                                    rpy_files[key_str] = v
                             
                             if not rpy_files:
                                 write_discovery_log("[RPA] No .rpy files in {}".format(file))
                                 continue
                             
-                            write_discovery_log("[RPA] Found {} .rpy files in {}".format(len(rpy_files), file))
+                            write_discovery_log("[RPA] Found {} .rpy files in {} (version {})".format(len(rpy_files), file, version))
                             
-                            # Создаём директорию
-                            os.makedirs(extract_dir, exist_ok=True)
-                            
-                            # Извлекаем каждый .rpy файл
+                            # Извлекаем каждый файл прямо в config.gamedir с сохранением пути
                             for filename, file_info in rpy_files.items():
                                 try:
-                                    # file_info - это список кортежей (offset, length, xor_key)
+                                    # Полный путь в game/
+                                    out_path = os.path.join(config.gamedir, filename)
+                                    
+                                    # Проверяем, существует ли файл уже
+                                    if os.path.exists(out_path):
+                                        skipped_count += 1
+                                        continue
+                                    
+                                    # Структура file_info
+                                    offset = 0
+                                    length = 0
+                                    prefix = b''
+                                    
                                     if isinstance(file_info, list) and len(file_info) > 0:
-                                        offset, length, xor_key = file_info[0]
-                                        
-                                        # Читаем данные
-                                        f.seek(offset)
-                                        data = f.read(length)
-                                        
-                                        # Применяем XOR если нужно
-                                        if xor_key:
-                                            data = bytes([b ^ xor_key for b in data])
-                                        
-                                        # Пробуем распаковать zlib
-                                        try:
-                                            data = zlib.decompress(data)
-                                        except:
-                                            pass  # Уже распаковано
+                                        entry = file_info[0]
+                                        if len(entry) >= 3:
+                                            offset, length, prefix = entry[0], entry[1], entry[2]
+                                        elif len(entry) >= 2:
+                                            offset, length = entry[0], entry[1]
+                                    elif isinstance(file_info, tuple):
+                                        if len(file_info) >= 3:
+                                            offset, length, prefix = file_info[0], file_info[1], file_info[2]
+                                        elif len(file_info) >= 2:
+                                            offset, length = file_info[0], file_info[1]
                                     
-                                    # Сохраняем файл
-                                    out_path = os.path.join(extract_dir, filename)
-                                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                                    # Читаем данные
+                                    f.seek(offset)
+                                    data = f.read(length)
                                     
+                                    # В RPA-3.0 prefix добавляется ДО XOR
+                                    if version == '3.0' and isinstance(prefix, bytes) and len(prefix) > 0:
+                                        data = prefix + data
+                                    
+                                    # XOR для RPA-3.0 (4-байтный ключ)
+                                    if version == '3.0' and xor_key:
+                                        data = bytes([b ^ ((xor_key >> (8 * (i % 4))) & 0xFF) for i, b in enumerate(data)])
+                                    
+                                    # Создаём директории если нужно
+                                    out_dir = os.path.dirname(out_path)
+                                    if out_dir:
+                                        os.makedirs(out_dir, exist_ok=True)
+                                    
+                                    # Сохраняем
                                     with open(out_path, 'wb') as out_f:
                                         out_f.write(data)
                                     
@@ -217,8 +279,8 @@ init python:
                                 except Exception as e:
                                     write_discovery_log("[RPA] Error extracting {}: {}".format(filename, e))
                             
-                            write_discovery_log("[RPA] Successfully extracted {} .rpy files from {}".format(
-                                len(rpy_files), file))
+                            write_discovery_log("[RPA] Extracted {} files, skipped {} (already exist)".format(
+                                extracted_count, skipped_count))
                     
                     except Exception as e:
                         write_discovery_log("[RPA] Error processing {}: {}".format(file, e))
@@ -229,10 +291,12 @@ init python:
     # AUTO-DISCOVERY FUNCTIONS
     # =========================================================================
     def get_all_rpy_files():
+        """Собирает все .rpy файлы в game/ """
         rpy_files = []
         for root, dirs, files in os.walk(config.gamedir):
-            if 'tl' in root or 'cache' in root or 'game\\tl' in root or 'game/tl' in root:
-                continue
+            # Пропускаем переводы и кэш
+            if 'tl' in root or 'cache' in root:
+                continue    
             for file in files:
                 if file.endswith('.rpy'):
                     rpy_files.append(os.path.join(root, file))
@@ -259,9 +323,7 @@ init python:
         return discovered_vars
     
     def discover_used_variables(rpy_files):
-        """Находит переменные, которые используются в присваиваниях в коде игры."""
         discovered_vars = {}
-        # Паттерн для поиска присваиваний: $ var = value, $ var += value, $ var -= value
         assignment_pattern = re.compile(r'^\s*\$\s*([a-zA-Z_]\w*)\s*[\+\-]?=\s*', re.MULTILINE)
         
         write_discovery_log("\n[USED VAR DISCOVERY] Scanning for variables used in assignments...")
@@ -273,7 +335,7 @@ init python:
             matches = assignment_pattern.findall(content)
             for var_name in matches:
                 if var_name not in discovered_vars:
-                    discovered_vars[var_name] = 0  # Значение по умолчанию
+                    discovered_vars[var_name] = 0
                     write_discovery_log("  [+] Found used variable: '{}' in {}".format(var_name, os.path.basename(filepath)))
                 
         write_discovery_log("[USED VAR DISCOVERY] Finished. Found {} used variables.".format(len(discovered_vars)))
@@ -344,7 +406,7 @@ init python:
         return discovered_patterns
 
     # =========================================================================
-    # AST FUNCTION CALL PARSER (определён до discover_label_changes)
+    # AST FUNCTION CALL PARSER
     # =========================================================================
     def parse_function_call_args(code_line):
         try:
@@ -387,14 +449,13 @@ init python:
             if new_text == text:
                 break
             text = new_text
-        text = text.replace(u"'", "'").replace(u"'", "'").replace(u""", '"').replace(u""", '"').replace(u"–", "-").replace(u"—", "-")
+        text = text.replace(u"\u2018", "'").replace(u"\u2019", "'").replace(u"\u201c", '"').replace(u"\u201d", '"').replace(u"\u2013", "-").replace(u"\u2014", "-")
         return text.strip()
 
     # =========================================================================
-    # DISCOVER LABEL CHANGES (использует parse_function_call_args)
+    # DISCOVER LABEL CHANGES
     # =========================================================================
     def discover_label_changes(rpy_files):
-        """Находит изменения переменных в начале каждого label."""
         label_changes = {}
         label_pattern = re.compile(r'^label\s+([a-zA-Z_]\w*)\s*:')
         
@@ -412,32 +473,26 @@ init python:
                     changes = []
                     label_indent = len(line) - len(line.lstrip())
                     
-                    # Отслеживаем вложенность if блоков
                     in_if_block = False
                     if_indent = None
                     
-                    # Парсим следующие 30 строк label'а
                     for j in range(i + 1, min(i + 31, len(lines))):
                         stripped = lines[j].strip()
                         if not stripped: continue
                         leading_spaces = len(lines[j]) - len(lines[j].lstrip())
                         
-                        # Вышли из label
                         if leading_spaces <= label_indent and stripped:
                             break
                         
-                        # Проверяем, вышли ли мы из if блока
                         if in_if_block and leading_spaces <= if_indent:
                             in_if_block = False
                             if_indent = None
                         
-                        # Проверяем, начинаем ли мы if блок
                         if stripped.startswith('if ') or stripped.startswith('elif '):
                             in_if_block = True
                             if_indent = leading_spaces
                             continue
                         
-                        # Пропускаем строки внутри if блоков
                         if in_if_block:
                             continue
                         
@@ -446,7 +501,6 @@ init python:
                             if func_res:
                                 changes.append(list(func_res))
                             else:
-                                # Расширенный regex для поддержки True/False
                                 calc_match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*([\+\-]?)=\s*([0-9\.]+|True|False)', stripped)
                                 if calc_match:
                                     changes.append([
@@ -463,20 +517,16 @@ init python:
         return label_changes
 
     def discover_screen_choices(rpy_files, label_changes):
-        """Находит screen'ы с imagebutton и связывает их с label'ами."""
         screen_choices = {}
         screen_pattern = re.compile(r'^screen\s+([a-zA-Z_]\w*)\s*\(')
-        # Улучшенный паттерн с поддержкой экранированных кавычек
         text_pattern = re.compile(r'text\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')')
         
-        # Паттерны для разных типов action'ов
         jump_call_pattern = re.compile(r'action\s+(?:Jump|Call)\s*\(\s*["\']([^"\']+)["\']\s*\)')
         return_pattern = re.compile(r'action\s+Return\s*\(')
         
         write_discovery_log("\n[SCREEN DISCOVERY] Scanning for screens with imagebutton...")
         
         def unescape_text(text):
-            """Удаляет экранирование из текста."""
             if text is None:
                 return None
             text = text.replace('\\"', '"').replace("\\'", "'")
@@ -495,7 +545,7 @@ init python:
                     screen_indent = len(line) - len(line.lstrip())
                     buttons = []
                     
-                    current_button_action = None  # {'type': 'jump'|'return', 'target': label_name|None}
+                    current_button_action = None
                     current_button_text = None
                     
                     for j in range(i + 1, len(lines)):
@@ -506,8 +556,6 @@ init python:
                         if leading_spaces <= screen_indent and stripped:
                             break
                         
-                        # Ищем imagebutton с action
-                        # Сначала проверяем Jump/Call
                         jump_match = jump_call_pattern.search(stripped)
                         if jump_match:
                             current_button_action = {
@@ -515,7 +563,6 @@ init python:
                                 'target': jump_match.group(1)
                             }
                         else:
-                            # Проверяем Return
                             return_match = return_pattern.search(stripped)
                             if return_match:
                                 current_button_action = {
@@ -523,13 +570,11 @@ init python:
                                     'target': None
                                 }
                         
-                        # Ищем text с поддержкой экранированных кавычек
                         text_match = text_pattern.search(stripped)
                         if text_match:
                             raw_text = text_match.group(1) if text_match.group(1) is not None else text_match.group(2)
                             current_button_text = unescape_text(raw_text)
                         
-                        # Если нашли и текст, и action — связываем
                         if current_button_text and current_button_action:
                             changes = []
                             jump_target = ""
@@ -558,7 +603,7 @@ init python:
         return screen_choices
 
     # =========================================================================
-    # INITIALIZATION & CONFIG LOADING (вызывается после определения всех функций)
+    # INITIALIZATION & CONFIG LOADING
     # =========================================================================
     if os.path.exists(CONFIG_PATH):
         write_discovery_log("\n[INIT] Config file found at {}. Loading...".format(CONFIG_PATH))
@@ -574,21 +619,25 @@ init python:
                     len(MENU_VARIABLE_NAMES), len(FUNCTION_PARSER_PATTERNS), len(LABEL_CHANGES), len(SCREEN_CHOICES)))
         except Exception as e:
             write_discovery_log("[INIT] Error loading JSON: {}. Falling back to auto-discovery.".format(e))
-            os.remove(CONFIG_PATH)
+            try:
+                os.remove(CONFIG_PATH)
+            except:
+                pass
 
     if not MENU_VARIABLE_NAMES:
         write_discovery_log("\n[INIT] No config found or empty. Starting full auto-discovery...")
         
-        # Проверяем наличие .rpy файлов
+        # Проверяем количество .rpy файлов
         test_files = get_all_rpy_files()
         
-        # Если .rpy файлов мало, пробуем извлечь из .rpa
+        # Если мало файлов, извлекаем из архивов
         if len(test_files) < 10:
-            write_discovery_log("[INIT] Few .rpy files found ({}). Attempting to extract from .rpa archives...".format(len(test_files)))
+            write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction...".format(len(test_files)))
             extracted = extract_rpa_scripts_only()
             if extracted > 0:
                 write_discovery_log("[INIT] Extracted {} .rpy scripts from .rpa archives".format(extracted))
         
+        # Сканируем все файлы (включая только что распакованные)
         all_files = get_all_rpy_files()
         write_discovery_log("[INIT] Found {} .rpy files to scan.".format(len(all_files)))
         
@@ -656,76 +705,40 @@ init python:
     renpy.store.cheat_set_var = cheat_set_var
 
     # =========================================================================
-    # CACHING
+    # CACHING (SIMPLIFIED)
     # =========================================================================
     _file_cache = {}
     _cache_timestamps = {}
     _menu_parse_cache = {}
-    _extracted_dirs_cache = None  # Кэш найденных извлечённых директорий
-
-    def _get_extracted_dirs():
-        """Возвращает список извлечённых директорий scripts_*."""
-        global _extracted_dirs_cache
-        if _extracted_dirs_cache is not None:
-            return _extracted_dirs_cache
-        
-        _extracted_dirs_cache = []
-        try:
-            for item in os.listdir(config.gamedir):
-                if item.startswith('scripts_') and os.path.isdir(os.path.join(config.gamedir, item)):
-                    _extracted_dirs_cache.append(os.path.join(config.gamedir, item))
-        except:
-            pass
-        
-        write_discovery_log("[CACHE] Found {} extracted directories".format(len(_extracted_dirs_cache)))
-        return _extracted_dirs_cache
 
     def get_file_content(filepath):
+        """Читает файл напрямую по пути. Кэширует результат."""
         try:
-            file_mtime = os.path.getmtime(filepath)
-            if filepath in _file_cache and _cache_timestamps.get(filepath) == file_mtime:
-                return _file_cache[filepath]
-            content = read_file_text(filepath)
-            if content is None:
-                # Файл не найден по прямому пути - ищем в извлечённых директориях
-                extracted_dirs = _get_extracted_dirs()
-                
-                # Извлекаем относительный путь от game/
-                rel_path = filepath
-                if rel_path.startswith(config.gamedir):
-                    rel_path = rel_path[len(config.gamedir):].lstrip(os.sep).lstrip('/')
-                
-                # Убираем префикс game/ если есть
-                if rel_path.startswith('game/') or rel_path.startswith('game\\'):
-                    rel_path = rel_path[5:]
-                
-                # Ищем файл в извлечённых директориях
-                for extract_dir in extracted_dirs:
-                    # Пробуем разные варианты путей
-                    search_paths = [
-                        os.path.join(extract_dir, rel_path),
-                        os.path.join(extract_dir, 'game', rel_path),
-                        os.path.join(extract_dir, 'game\\' + rel_path.replace('/', '\\')),
-                    ]
-                    
-                    for search_path in search_paths:
-                        if os.path.exists(search_path):
-                            content = read_file_text(search_path)
-                            if content is not None:
-                                write_discovery_log("[CACHE] Found file in extracted dir: {}".format(search_path))
-                                break
-                    
-                    if content is not None:
-                        break
+            # Проверяем кэш
+            if filepath in _file_cache:
+                try:
+                    file_mtime = os.path.getmtime(filepath)
+                    if _cache_timestamps.get(filepath) == file_mtime:
+                        return _file_cache[filepath]
+                except:
+                    return _file_cache[filepath]
             
+            # Читаем файл
+            content = read_file_text(filepath)
             if content is None:
                 return None
             
             lines = content.splitlines()
             _file_cache[filepath] = lines
-            _cache_timestamps[filepath] = file_mtime
+            
+            try:
+                _cache_timestamps[filepath] = os.path.getmtime(filepath)
+            except:
+                pass
+            
             return lines
-        except: return None
+        except:
+            return None
 
     # =========================================================================
     # MAIN MENU PARSER
@@ -830,25 +843,21 @@ init python:
             write_cheat_log(traceback.format_exc())
             return caption_clean
 
-     # =========================================================================
+    # =========================================================================
     # SCREEN TRACKING
     # =========================================================================
-    _current_choice_screen = None  # Только один активный screen с выборами
+    _current_choice_screen = None
     _original_show_screen = renpy.show_screen
     _original_hide_screen = renpy.hide_screen
     
     def tracked_show_screen(name, *args, **kwargs):
-        """Перехватывает show_screen для отслеживания активного screen'а с выборами."""
         global _current_choice_screen
-        # Если показывается screen с выборами, запоминаем его
         if name in SCREEN_CHOICES:
             _current_choice_screen = name
         return _original_show_screen(name, *args, **kwargs)
     
     def tracked_hide_screen(name, *args, **kwargs):
-        """Перехватывает hide_screen для очистки активного screen'а."""
         global _current_choice_screen
-        # Если скрывается текущий screen с выборами, очищаем
         if name == _current_choice_screen:
             _current_choice_screen = None
         return _original_hide_screen(name, *args, **kwargs)
@@ -860,7 +869,6 @@ init python:
     # IMAGEBUTTON OVERLAY SYSTEM
     # =========================================================================
     def create_imagebutton_overlay(screen_name):
-        """Создаёт overlay с подсказками для imagebutton'ов."""
         if screen_name not in SCREEN_CHOICES:
             return
         
@@ -868,7 +876,6 @@ init python:
         if not choices:
             return
         
-        # Создаём универсальный overlay
         overlay_id = "imagebutton_overlay"
         
         try:
@@ -879,12 +886,9 @@ init python:
         renpy.show_screen(overlay_id, screen_name=screen_name, choices=choices)
 
     def imagebutton_overlay_tracker():
-        """Отслеживает активные screen'ы и создаёт overlay'и."""
         global _current_choice_screen
         
-        # Проверяем, есть ли текущий screen
         if not _current_choice_screen:
-            # Скрываем overlay если он показан
             try:
                 if renpy.get_screen("imagebutton_overlay"):
                     renpy.hide_screen("imagebutton_overlay")
@@ -892,9 +896,7 @@ init python:
                 pass
             return
         
-        # Проверяем, есть ли screen в SCREEN_CHOICES
         if _current_choice_screen not in SCREEN_CHOICES:
-            # Screen есть, но без choices - скрываем overlay
             try:
                 if renpy.get_screen("imagebutton_overlay"):
                     renpy.hide_screen("imagebutton_overlay")
@@ -902,9 +904,7 @@ init python:
                 pass
             return
         
-        # Проверяем, действительно ли screen активен
         if not renpy.get_screen(_current_choice_screen):
-            # Screen не активен - очищаем и скрываем overlay
             _current_choice_screen = None
             try:
                 if renpy.get_screen("imagebutton_overlay"):
@@ -913,7 +913,6 @@ init python:
                 pass
             return
         
-        # Всё ок - показываем overlay
         try:
             choices = SCREEN_CHOICES[_current_choice_screen]
             if choices:
