@@ -482,10 +482,10 @@ init python:
             MENU_VARIABLE_NAMES[var_name] = var_name
         
         # Добавляем переменные, которые используются в присваиваниях
-        used_vars = discover_used_variables(all_files)
-        for var_name in used_vars:
-            if var_name not in MENU_VARIABLE_NAMES:
-                MENU_VARIABLE_NAMES[var_name] = var_name
+        #used_vars = discover_used_variables(all_files)
+        #for var_name in used_vars:
+        #    if var_name not in MENU_VARIABLE_NAMES:
+        #        MENU_VARIABLE_NAMES[var_name] = var_name
             
         discovered_patterns = discover_function_patterns(all_files, discovered_vars)
         FUNCTION_PARSER_PATTERNS.update(discovered_patterns)
