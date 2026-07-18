@@ -364,15 +364,17 @@ init python:
         # Улучшенный паттерн с поддержкой экранированных кавычек
         text_pattern = re.compile(r'text\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')')
         
+        # Паттерны для разных типов action'ов
+        jump_call_pattern = re.compile(r'action\s+(?:Jump|Call)\s*\(\s*["\']([^"\']+)["\']\s*\)')
+        return_pattern = re.compile(r'action\s+Return\s*\(')
+        
         write_discovery_log("\n[SCREEN DISCOVERY] Scanning for screens with imagebutton...")
         
         def unescape_text(text):
             """Удаляет экранирование из текста."""
             if text is None:
                 return None
-            # Заменяем экранированные кавычки на обычные
             text = text.replace('\\"', '"').replace("\\'", "'")
-            # Заменяем другие экранированные символы
             text = text.replace('\\n', '\n').replace('\\t', '\t')
             return text
         
@@ -388,7 +390,7 @@ init python:
                     screen_indent = len(line) - len(line.lstrip())
                     buttons = []
                     
-                    current_button_jump = None
+                    current_button_action = None  # {'type': 'jump'|'return', 'target': label_name|None}
                     current_button_text = None
                     
                     for j in range(i + 1, len(lines)):
@@ -399,28 +401,49 @@ init python:
                         if leading_spaces <= screen_indent and stripped:
                             break
                         
-                        # Ищем imagebutton с Jump
-                        jump_match = re.search(r'action\s+Jump\(["\']([^"\']+)["\']\)', stripped)
+                        # Ищем imagebutton с action
+                        # Сначала проверяем Jump/Call
+                        jump_match = jump_call_pattern.search(stripped)
                         if jump_match:
-                            current_button_jump = jump_match.group(1)
+                            current_button_action = {
+                                'type': 'jump',
+                                'target': jump_match.group(1)
+                            }
+                        else:
+                            # Проверяем Return
+                            return_match = return_pattern.search(stripped)
+                            if return_match:
+                                current_button_action = {
+                                    'type': 'return',
+                                    'target': None
+                                }
                         
                         # Ищем text с поддержкой экранированных кавычек
                         text_match = text_pattern.search(stripped)
                         if text_match:
-                            # Извлекаем текст из группы 1 (двойные кавычки) или 2 (одинарные)
                             raw_text = text_match.group(1) if text_match.group(1) is not None else text_match.group(2)
                             current_button_text = unescape_text(raw_text)
                         
-                        # Если нашли и текст, и jump — связываем
-                        if current_button_text and current_button_jump:
-                            changes = label_changes.get(current_button_jump, [])
+                        # Если нашли и текст, и action — связываем
+                        if current_button_text and current_button_action:
+                            changes = []
+                            jump_target = ""
+                            
+                            if current_button_action['type'] == 'jump' and current_button_action['target']:
+                                jump_target = current_button_action['target']
+                                changes = label_changes.get(jump_target, [])
+                            elif current_button_action['type'] == 'return':
+                                jump_target = "__return__"
+                                changes = []
+                            
                             buttons.append({
                                 'text': current_button_text,
-                                'jump': current_button_jump,
+                                'jump': jump_target,
+                                'action_type': current_button_action['type'],
                                 'changes': changes
                             })
                             current_button_text = None
-                            current_button_jump = None
+                            current_button_action = None
                     
                     if buttons:
                         screen_choices[screen_name] = buttons

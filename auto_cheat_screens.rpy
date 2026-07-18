@@ -70,9 +70,15 @@ screen screen_choice_details(screens):
                                         spacing 10
                                         xfill True
                                         
-                                        text "• [choice['text']]" size 24 color "#fff" xsize 350
+                                        # Показываем иконку типа действия
+                                        $ action_icon = "↩" if choice.get('action_type') == 'return' else "→"
+                                        $ action_color = "#aaa" if choice.get('action_type') == 'return' else "#fff"
                                         
-                                        if choice['changes']:
+                                        text "[action_icon] [choice['text']]" size 24 color action_color xsize 350
+                                        
+                                        if choice.get('action_type') == 'return':
+                                            text "Return (no changes)" size 20 color "#888"
+                                        elif choice['changes']:
                                             $ changes_text = ", ".join([
                                                 "{} {}{}".format(
                                                     c[0],
@@ -83,7 +89,6 @@ screen screen_choice_details(screens):
                                             text changes_text size 20 color "#2ecc71"
                                         else:
                                             text "no changes" size 20 color "#888"
-
 default cheat_input_value = ""
 
 # Semi-transparent launcher button in the top right corner

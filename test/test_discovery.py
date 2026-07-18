@@ -249,14 +249,14 @@ screen my_choice():
         assert result['my_choice'][1]['changes'] == [['mc_karma', '-', '3']]
 
     def test_screen_without_jump(self, discovery_env):
-        """Screen без Jump — не должен обнаруживаться."""
+        """Screen без action Jump/Call/Return — не должен обнаруживаться."""
         cheat, tmp_path = discovery_env
         label_changes = {}
         
         write_rpy(tmp_path, 'test.rpy', '''
 screen no_jump():
     imagebutton:
-        action Return()
+        action NullAction()
     text "Закрыть"
 ''')
         files = get_rpy_files(cheat, tmp_path)
@@ -778,3 +778,60 @@ label scene_start:
         # Все переменные должны быть найдены
         assert 'mc_karma' in cheat['MENU_VARIABLE_NAMES']  # из default
         assert 'ep2_wetPaper' in cheat['MENU_VARIABLE_NAMES']  # из присваивания
+
+    def test_screen_with_return_action(self, discovery_env):
+        """Screen с action Return()."""
+        cheat, tmp_path = discovery_env
+        label_changes = {
+            'choice_continue': [['var1', '+', '1']],
+        }
+        
+        write_rpy(tmp_path, 'test.rpy', '''
+screen choice_screen():
+    imagebutton:
+        action Return()
+    text "Отдохнуть"
+
+    imagebutton:
+        action Jump("choice_continue")
+    text "Продолжить"
+''')
+        files = get_rpy_files(cheat, tmp_path)
+        result = cheat['discover_screen_choices'](files, label_changes)
+        
+        assert 'choice_screen' in result
+        assert len(result['choice_screen']) == 2
+        
+        # Проверяем кнопку Return
+        return_btn = next(b for b in result['choice_screen'] if b['text'] == 'Отдохнуть')
+        assert return_btn['action_type'] == 'return'
+        assert return_btn['jump'] == '__return__'
+        assert return_btn['changes'] == []
+        
+        # Проверяем кнопку Jump
+        jump_btn = next(b for b in result['choice_screen'] if b['text'] == 'Продолжить')
+        assert jump_btn['action_type'] == 'jump'
+        assert jump_btn['jump'] == 'choice_continue'
+
+    def test_screen_with_call_action(self, discovery_env):
+        """Screen с action Call()."""
+        cheat, tmp_path = discovery_env
+        label_changes = {
+            'subroutine_label': [['var1', '+', '5']],
+        }
+        
+        write_rpy(tmp_path, 'test.rpy', '''
+screen choice_screen():
+    imagebutton:
+        action Call("subroutine_label")
+    text "Выполнить подпрограмму"
+''')
+        files = get_rpy_files(cheat, tmp_path)
+        result = cheat['discover_screen_choices'](files, label_changes)
+        
+        assert 'choice_screen' in result
+        assert len(result['choice_screen']) == 1
+        
+        call_btn = result['choice_screen'][0]
+        assert call_btn['action_type'] == 'jump'  # Call обрабатывается как jump
+        assert call_btn['jump'] == 'subroutine_label'
