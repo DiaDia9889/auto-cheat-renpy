@@ -742,36 +742,47 @@ init python:
         """Отслеживает активные screen'ы и создаёт overlay'и."""
         global _current_choice_screen
         
-        if not _current_choice_screen or _current_choice_screen not in SCREEN_CHOICES:
+        # Проверяем, есть ли текущий screen и есть ли он в SCREEN_CHOICES
+        if not _current_choice_screen:
+            # Скрываем overlay если он показан
+            try:
+                if renpy.get_screen("imagebutton_overlay"):
+                    renpy.hide_screen("imagebutton_overlay")
+            except:
+                pass
             return
         
+        if _current_choice_screen not in SCREEN_CHOICES:
+            # Screen есть, но без choices - скрываем overlay
+            try:
+                if renpy.get_screen("imagebutton_overlay"):
+                    renpy.hide_screen("imagebutton_overlay")
+            except:
+                pass
+            return
+        
+        # Проверяем, действительно ли screen активен
+        if not renpy.get_screen(_current_choice_screen):
+            # Screen не активен - очищаем и скрываем overlay
+            _current_choice_screen = None
+            try:
+                if renpy.get_screen("imagebutton_overlay"):
+                    renpy.hide_screen("imagebutton_overlay")
+            except:
+                pass
+            return
+        
+        # Всё ок - показываем overlay
         try:
-            create_imagebutton_overlay(_current_choice_screen)
+            choices = SCREEN_CHOICES[_current_choice_screen]
+            if choices:
+                if not renpy.get_screen("imagebutton_overlay"):
+                    renpy.show_screen("imagebutton_overlay", screen_name=_current_choice_screen, choices=choices)
         except Exception as e:
             write_cheat_log("IMAGEBUTTON OVERLAY ERROR: {}".format(e))
 
     config.overlay_functions.append(imagebutton_overlay_tracker)
-    # =========================================================================
-    # SCREEN CHOICE OVERLAY
-    # =========================================================================
-    def screen_choice_indicator():
-        """Показывает индикатор на экране с imagebutton."""
-        if not SCREEN_CHOICES or not _current_choice_screen:
-            return
-        
-        try:
-            # Скрываем предыдущий индикатор, если есть
-            if renpy.get_screen("screen_choice_indicator"):
-                renpy.hide_screen("screen_choice_indicator")
-            
-            # Показываем индикатор только для текущего screen'а
-            if renpy.has_screen("screen_choice_indicator"):
-                renpy.show_screen("screen_choice_indicator", screens=[_current_choice_screen])
-        except:
-            pass
-
-    config.overlay_functions.append(screen_choice_indicator)
-
+    
     # =========================================================================
     # MENU PROXY & UI
     # =========================================================================
