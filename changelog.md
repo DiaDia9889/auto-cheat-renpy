@@ -1,3 +1,31 @@
+## [6.2] — 2026-07-18
+### Added
+- **Automatic Imagebutton Overlay System:** Implemented real-time overlay that automatically displays variable change hints on screens with imagebutton choices, eliminating the need to click a separate CHOICES button.
+- **Screen Activity Validation:** Added comprehensive checks in `imagebutton_overlay_tracker` to ensure overlay only appears when:
+  - A current choice screen is active (`_current_choice_screen` is set)
+  - The screen exists in `SCREEN_CHOICES` configuration
+  - The screen is actually being displayed (verified via `renpy.get_screen()`)
+- **Automatic Overlay Cleanup:** Overlay automatically hides when the associated screen closes or when no valid choice screen is active.
+- **Return/Call Action Support:** Extended screen choice parser to detect and properly handle `action Return()` and `action Call(...)` in addition to `action Jump(...)`.
+
+### Changed
+- **Overlay Display Logic:** Replaced manual CHOICES button interaction with automatic overlay display that appears instantly when choice screens are shown.
+- **Screen Tracking Robustness:** Enhanced `_current_choice_screen` management to properly clear state when screens close, preventing stale overlay displays.
+
+### Fixed
+- **Overlay Persistence Bug:** Resolved issue where overlay would remain visible even after choice screens closed, by adding proper cleanup logic in `imagebutton_overlay_tracker`.
+- **Screen Validation:** Added checks to prevent overlay from showing on screens without choices or when no screen is active.
+
+---
+
+## [6.1] — 2026-07-18
+### Changed
+- **Centralized Style Constants:** Migrated all color values to Python constants (`CC_GOLD`, `CC_RED`, `CC_GREEN`, etc.) and Ren'Py style definitions for easier customization.
+- **Version Tracking:** Added `CHEAT_VERSION` constant for single-point version updates.
+- **Code Deduplication:** Extracted repeated text/frame properties into reusable style definitions.
+
+---
+
 ## [6.0] — 2026-07-18
 ### Added
 - **Screen Choice Tracking System:** Implemented a comprehensive interception layer via `renpy.show_screen()` / `renpy.hide_screen()` monkey-patching to track active visual screens in real-time.

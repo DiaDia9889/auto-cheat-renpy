@@ -742,7 +742,7 @@ init python:
         """Отслеживает активные screen'ы и создаёт overlay'и."""
         global _current_choice_screen
         
-        # Проверяем, есть ли текущий screen и есть ли он в SCREEN_CHOICES
+        # Проверяем, есть ли текущий screen
         if not _current_choice_screen:
             # Скрываем overlay если он показан
             try:
@@ -752,6 +752,7 @@ init python:
                 pass
             return
         
+        # Проверяем, есть ли screen в SCREEN_CHOICES
         if _current_choice_screen not in SCREEN_CHOICES:
             # Screen есть, но без choices - скрываем overlay
             try:
@@ -782,7 +783,7 @@ init python:
             write_cheat_log("IMAGEBUTTON OVERLAY ERROR: {}".format(e))
 
     config.overlay_functions.append(imagebutton_overlay_tracker)
-    
+
     # =========================================================================
     # MENU PROXY & UI
     # =========================================================================
