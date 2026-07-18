@@ -1,21 +1,12 @@
-# =========================================================================
-# AUTO CHEAT - UNIVERSAL EDITION (AUTO-DISCOVERY v6.0)
-# =========================================================================
-# v6.0 - Screen Choice Tracking:
-#      - Tracks active screens via show_screen/hide_screen interception
-#      - Auto-discovers labels and their variable changes
-#      - Auto-discovers screens with imagebutton + Jump actions
-#      - Shows indicator overlay on screens with choices
-#      - Detailed popup with all button effects
-#      - Full Python 2.7 (Ren'Py 6.99/7.x) & Python 3 (Ren'Py 8.x) support
-# =========================================================================
-
 init python:
     import re
     import os
     import ast
     import sys
     import json
+    import struct
+    import pickle
+    import zlib
 
     # =========================================================================
     # CONFIGURATION
@@ -123,6 +114,116 @@ init python:
     CHOICE_PATTERN = re.compile(r'(?:"([^"]+)"|\'([^\']+)\')\s*(?:if\s+[^:]+)?\s*:')
     CALC_PATTERN = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*([\+\-]?)=\s*([0-9\.]+)')
     TAG_PATTERN = re.compile(r'\{[^}]*\}')
+
+    # =========================================================================
+    # RPA ARCHIVE EXTRACTION (OPTIMIZED)
+    # =========================================================================
+    def extract_rpa_scripts_only():
+        """Извлекает только .rpy скрипты из .rpa архивов."""
+        extracted_count = 0
+        
+        for root, dirs, files in os.walk(config.gamedir):
+            if 'tl' in root or 'cache' in root:
+                continue
+            
+            for file in files:
+                if file.endswith('.rpa'):
+                    rpa_path = os.path.join(root, file)
+                    extract_dir = os.path.join(root, 'scripts_' + file.replace('.rpa', ''))
+                    
+                    # Проверяем, уже ли распаковано
+                    if os.path.exists(extract_dir):
+                        write_discovery_log("[RPA] Scripts from {} already extracted".format(file))
+                        continue
+                    
+                    write_discovery_log("[RPA] Extracting .rpy scripts from: {}".format(file))
+                    
+                    try:
+                        with open(rpa_path, 'rb') as f:
+                            # Читаем заголовок
+                            header = f.read(4)
+                            if header != b'RPA-':
+                                write_discovery_log("[RPA] Invalid RPA header in {}".format(file))
+                                continue
+                            
+                            # Читаем версию
+                            version = f.read(4).decode('ascii').strip()
+                            
+                            # Читаем длину индекса
+                            index_len_data = f.read(4)
+                            index_len = struct.unpack('<I', index_len_data)[0]
+                            
+                            # Читаем индекс
+                            index_data = f.read(index_len)
+                            
+                            # Десериализуем индекс (pickle)
+                            try:
+                                index = pickle.loads(index_data)
+                            except:
+                                # Попробуем с фиксированными протоколами
+                                for protocol in [0, 1, 2]:
+                                    try:
+                                        index = pickle.loads(index_data, encoding='bytes')
+                                        break
+                                    except:
+                                        continue
+                                else:
+                                    write_discovery_log("[RPA] Failed to parse index in {}".format(file))
+                                    continue
+                            
+                            # Фильтруем только .rpy файлы
+                            rpy_files = {k: v for k, v in index.items() 
+                                        if isinstance(k, str) and k.endswith('.rpy')}
+                            
+                            if not rpy_files:
+                                write_discovery_log("[RPA] No .rpy files in {}".format(file))
+                                continue
+                            
+                            write_discovery_log("[RPA] Found {} .rpy files in {}".format(len(rpy_files), file))
+                            
+                            # Создаём директорию
+                            os.makedirs(extract_dir, exist_ok=True)
+                            
+                            # Извлекаем каждый .rpy файл
+                            for filename, file_info in rpy_files.items():
+                                try:
+                                    # file_info - это список кортежей (offset, length, xor_key)
+                                    if isinstance(file_info, list) and len(file_info) > 0:
+                                        offset, length, xor_key = file_info[0]
+                                        
+                                        # Читаем данные
+                                        f.seek(offset)
+                                        data = f.read(length)
+                                        
+                                        # Применяем XOR если нужно
+                                        if xor_key:
+                                            data = bytes([b ^ xor_key for b in data])
+                                        
+                                        # Пробуем распаковать zlib
+                                        try:
+                                            data = zlib.decompress(data)
+                                        except:
+                                            pass  # Уже распаковано
+                                    
+                                    # Сохраняем файл
+                                    out_path = os.path.join(extract_dir, filename)
+                                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                                    
+                                    with open(out_path, 'wb') as out_f:
+                                        out_f.write(data)
+                                    
+                                    extracted_count += 1
+                                
+                                except Exception as e:
+                                    write_discovery_log("[RPA] Error extracting {}: {}".format(filename, e))
+                            
+                            write_discovery_log("[RPA] Successfully extracted {} .rpy files from {}".format(
+                                len(rpy_files), file))
+                    
+                    except Exception as e:
+                        write_discovery_log("[RPA] Error processing {}: {}".format(file, e))
+        
+        return extracted_count
 
     # =========================================================================
     # AUTO-DISCOVERY FUNCTIONS
@@ -286,7 +387,7 @@ init python:
             if new_text == text:
                 break
             text = new_text
-        text = text.replace(u"’", "'").replace(u"‘", "'").replace(u"“", '"').replace(u"”", '"').replace(u"–", "-").replace(u"—", "-")
+        text = text.replace(u"'", "'").replace(u"'", "'").replace(u""", '"').replace(u""", '"').replace(u"–", "-").replace(u"—", "-")
         return text.strip()
 
     # =========================================================================
@@ -478,6 +579,16 @@ init python:
     if not MENU_VARIABLE_NAMES:
         write_discovery_log("\n[INIT] No config found or empty. Starting full auto-discovery...")
         
+        # Проверяем наличие .rpy файлов
+        test_files = get_all_rpy_files()
+        
+        # Если .rpy файлов мало, пробуем извлечь из .rpa
+        if len(test_files) < 10:
+            write_discovery_log("[INIT] Few .rpy files found ({}). Attempting to extract from .rpa archives...".format(len(test_files)))
+            extracted = extract_rpa_scripts_only()
+            if extracted > 0:
+                write_discovery_log("[INIT] Extracted {} .rpy scripts from .rpa archives".format(extracted))
+        
         all_files = get_all_rpy_files()
         write_discovery_log("[INIT] Found {} .rpy files to scan.".format(len(all_files)))
         
@@ -550,6 +661,24 @@ init python:
     _file_cache = {}
     _cache_timestamps = {}
     _menu_parse_cache = {}
+    _extracted_dirs_cache = None  # Кэш найденных извлечённых директорий
+
+    def _get_extracted_dirs():
+        """Возвращает список извлечённых директорий scripts_*."""
+        global _extracted_dirs_cache
+        if _extracted_dirs_cache is not None:
+            return _extracted_dirs_cache
+        
+        _extracted_dirs_cache = []
+        try:
+            for item in os.listdir(config.gamedir):
+                if item.startswith('scripts_') and os.path.isdir(os.path.join(config.gamedir, item)):
+                    _extracted_dirs_cache.append(os.path.join(config.gamedir, item))
+        except:
+            pass
+        
+        write_discovery_log("[CACHE] Found {} extracted directories".format(len(_extracted_dirs_cache)))
+        return _extracted_dirs_cache
 
     def get_file_content(filepath):
         try:
@@ -557,35 +686,46 @@ init python:
             if filepath in _file_cache and _cache_timestamps.get(filepath) == file_mtime:
                 return _file_cache[filepath]
             content = read_file_text(filepath)
-            if content is None: return None
+            if content is None:
+                # Файл не найден по прямому пути - ищем в извлечённых директориях
+                extracted_dirs = _get_extracted_dirs()
+                
+                # Извлекаем относительный путь от game/
+                rel_path = filepath
+                if rel_path.startswith(config.gamedir):
+                    rel_path = rel_path[len(config.gamedir):].lstrip(os.sep).lstrip('/')
+                
+                # Убираем префикс game/ если есть
+                if rel_path.startswith('game/') or rel_path.startswith('game\\'):
+                    rel_path = rel_path[5:]
+                
+                # Ищем файл в извлечённых директориях
+                for extract_dir in extracted_dirs:
+                    # Пробуем разные варианты путей
+                    search_paths = [
+                        os.path.join(extract_dir, rel_path),
+                        os.path.join(extract_dir, 'game', rel_path),
+                        os.path.join(extract_dir, 'game\\' + rel_path.replace('/', '\\')),
+                    ]
+                    
+                    for search_path in search_paths:
+                        if os.path.exists(search_path):
+                            content = read_file_text(search_path)
+                            if content is not None:
+                                write_discovery_log("[CACHE] Found file in extracted dir: {}".format(search_path))
+                                break
+                    
+                    if content is not None:
+                        break
+            
+            if content is None:
+                return None
+            
             lines = content.splitlines()
             _file_cache[filepath] = lines
             _cache_timestamps[filepath] = file_mtime
             return lines
         except: return None
-
-    def get_parsed_menu(filepath, menu_idx, lines):
-        cache_key = "{}:{}".format(filepath, menu_idx)
-        if cache_key in _menu_parse_cache: return _menu_parse_cache[cache_key]
-        
-        menu_indent = len(lines[menu_idx]) - len(lines[menu_idx].lstrip())
-        current_blocks, current_choice, choice_indent = {}, None, None
-        for i in range(menu_idx + 1, len(lines)):
-            line, stripped = lines[i], lines[i].strip()
-            if not stripped: continue
-            leading_spaces = len(line) - len(line.lstrip())
-            if leading_spaces <= menu_indent and stripped: break
-            match_choice = CHOICE_PATTERN.search(stripped)
-            if match_choice:
-                if choice_indent is None: choice_indent = leading_spaces
-                if leading_spaces == choice_indent:
-                    current_choice = match_choice.group(1) if match_choice.group(1) else match_choice.group(2)
-                    current_blocks[current_choice] = []
-                    continue
-            if current_choice and leading_spaces > choice_indent:
-                current_blocks[current_choice].append(line)
-        _menu_parse_cache[cache_key] = current_blocks
-        return current_blocks
 
     # =========================================================================
     # MAIN MENU PARSER
