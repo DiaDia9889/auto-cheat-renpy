@@ -183,6 +183,45 @@ screen screen_choice_details(screens):
                                             text "no changes" size 20 color CC_DIM_GRAY
 
 # =========================================================================
+# IMAGEBUTTON OVERLAY SCREENS
+# =========================================================================
+
+screen imagebutton_overlay(screen_name, choices):
+    zorder 198
+    
+    # Показываем компактный список подсказок внизу экрана
+    frame:
+        xalign 0.5
+        yalign 0.95
+        background "#000000aa"
+        padding (20, 15)
+        
+        vbox:
+            spacing 8
+            
+            text "Screen: [screen_name]" size 16 color CC_GOLD bold True
+            
+            for choice in choices:
+                hbox:
+                    spacing 10
+                    
+                    $ action_icon = u"\u21A9" if choice.get('action_type') == 'return' else u"\u2192"
+                    
+                    text "[action_icon] [choice['text']]" size 16 color CC_WHITE
+                    
+                    if choice.get('changes'):
+                        $ changes_text = ", ".join([
+                            "{} {}{}".format(
+                                c[0],
+                                "+=" if c[1] == '+' else ("-=" if c[1] == '-' else "="),
+                                c[2]
+                            ) for c in choice['changes']
+                        ])
+                        text "[changes_text]" size 16 color CC_GREEN
+                    else:
+                        text "no changes" size 16 color CC_DIM_GRAY
+
+# =========================================================================
 # MAIN CHEAT UI
 # =========================================================================
 

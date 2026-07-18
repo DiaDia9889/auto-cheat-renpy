@@ -717,6 +717,41 @@ init python:
     renpy.hide_screen = tracked_hide_screen
 
     # =========================================================================
+    # IMAGEBUTTON OVERLAY SYSTEM
+    # =========================================================================
+    def create_imagebutton_overlay(screen_name):
+        """Создаёт overlay с подсказками для imagebutton'ов."""
+        if screen_name not in SCREEN_CHOICES:
+            return
+        
+        choices = SCREEN_CHOICES[screen_name]
+        if not choices:
+            return
+        
+        # Создаём универсальный overlay
+        overlay_id = "imagebutton_overlay"
+        
+        try:
+            renpy.hide_screen(overlay_id)
+        except:
+            pass
+        
+        renpy.show_screen(overlay_id, screen_name=screen_name, choices=choices)
+
+    def imagebutton_overlay_tracker():
+        """Отслеживает активные screen'ы и создаёт overlay'и."""
+        global _current_choice_screen
+        
+        if not _current_choice_screen or _current_choice_screen not in SCREEN_CHOICES:
+            return
+        
+        try:
+            create_imagebutton_overlay(_current_choice_screen)
+        except Exception as e:
+            write_cheat_log("IMAGEBUTTON OVERLAY ERROR: {}".format(e))
+
+    config.overlay_functions.append(imagebutton_overlay_tracker)
+    # =========================================================================
     # SCREEN CHOICE OVERLAY
     # =========================================================================
     def screen_choice_indicator():
