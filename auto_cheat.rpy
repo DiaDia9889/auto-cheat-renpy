@@ -17,7 +17,11 @@ init python:
     import sys
     import json
 
+    # =========================================================================
+    # CONFIGURATION
+    # =========================================================================
     DEBUG_MODE = True
+    DISCOVER_USED_VARIABLES = False  # Set to True to discover variables from $ assignments
     FONT_SIZE_MODIFIER = -4
 
     # =========================================================================
@@ -481,11 +485,11 @@ init python:
         for var_name in discovered_vars:
             MENU_VARIABLE_NAMES[var_name] = var_name
         
-        # Добавляем переменные, которые используются в присваиваниях
-        #used_vars = discover_used_variables(all_files)
-        #for var_name in used_vars:
-        #    if var_name not in MENU_VARIABLE_NAMES:
-        #        MENU_VARIABLE_NAMES[var_name] = var_name
+        if DISCOVER_USED_VARIABLES:
+            used_vars = discover_used_variables(all_files)
+            for var_name in used_vars:
+                if var_name not in MENU_VARIABLE_NAMES:
+                    MENU_VARIABLE_NAMES[var_name] = var_name
             
         discovered_patterns = discover_function_patterns(all_files, discovered_vars)
         FUNCTION_PARSER_PATTERNS.update(discovered_patterns)

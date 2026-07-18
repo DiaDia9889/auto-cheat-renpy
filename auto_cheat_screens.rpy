@@ -221,7 +221,7 @@ screen cheat_manager_overlay():
             hbox:
                 xfill True
                 text "STATS & VARIABLES CONTROL PANEL" style "cheat_title_text"
-                textbutton "CLOSE [[X]]" xalign 1.0:
+                textbutton "CLOSE" xalign 1.0:
                     action ToggleScreen("cheat_manager_overlay")
                     text_style "cheat_btn_close_text"
 
@@ -251,7 +251,7 @@ screen cheat_manager_overlay():
                             hbox:
                                 xsize 280
                                 yalign 0.5
-                                text "[var_display] ([var_real]) = " style "cheat_label_text"
+                                text "[var_display] = " style "cheat_label_text"
                                 text "[current_value]" style "cheat_value_text"
 
                             # Quick adjust buttons
