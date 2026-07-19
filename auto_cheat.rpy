@@ -8,6 +8,7 @@ init python:
     import pickle
     import zlib
     import subprocess
+    import shutil
 
     # =========================================================================
     # CONFIGURATION
@@ -565,14 +566,10 @@ init python:
         
         rpy_path = rpyc_path[:-1]  # .rpyc -> .rpy
         
-        # Если .rpy уже существует — пропускаем
-        if os.path.exists(rpy_path):
-            write_discovery_log("[RPYC] Already decompiled: {}".format(os.path.basename(rpy_path)))
-            return True
-        
         try:
             # Определяем команду
             if unrpyc_path == 'unrpyc':
+                # Команда из PATH
                 cmd = ['unrpyc', rpyc_path]
                 cwd = None
             elif unrpyc_path == '__python_module__':
@@ -592,7 +589,8 @@ init python:
                 cmd = [unrpyc_path, rpyc_path]
                 cwd = None
             
-            write_discovery_log("[RPYC] Decompiling: {}".format(os.path.basename(rpyc_path)))
+            write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
+                os.path.basename(rpyc_path), os.path.basename(rpy_path)))
             
             result = subprocess.run(
                 cmd,
@@ -604,18 +602,18 @@ init python:
             
             if result.returncode == 0:
                 if os.path.exists(rpy_path):
-                    write_discovery_log("[RPYC] OK: {}".format(os.path.basename(rpy_path)))
+                    write_discovery_log("[RPYC] Successfully decompiled: {}".format(os.path.basename(rpy_path)))
                     return True
                 else:
-                    write_discovery_log("[RPYC] Completed but .rpy not created")
+                    write_discovery_log("[RPYC] unrpyc completed but .rpy not created")
                     return False
             else:
-                write_discovery_log("[RPYC] Failed (code {}): {}".format(
+                write_discovery_log("[RPYC] unrpyc failed (code {}): {}".format(
                     result.returncode, (result.stderr or result.stdout)[:300]))
                 return False
         
         except subprocess.TimeoutExpired:
-            write_discovery_log("[RPYC] Timeout: {}".format(os.path.basename(rpyc_path)))
+            write_discovery_log("[RPYC] Decompilation timeout: {}".format(os.path.basename(rpyc_path)))
             return False
         except Exception as e:
             write_discovery_log("[RPYC] Error: {}".format(e))
