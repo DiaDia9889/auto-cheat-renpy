@@ -565,42 +565,57 @@ init python:
         
         rpy_path = rpyc_path[:-1]  # .rpyc -> .rpy
         
+        # Если .rpy уже существует — пропускаем
+        if os.path.exists(rpy_path):
+            write_discovery_log("[RPYC] Already decompiled: {}".format(os.path.basename(rpy_path)))
+            return True
+        
         try:
             # Определяем команду
             if unrpyc_path == 'unrpyc':
                 cmd = ['unrpyc', rpyc_path]
+                cwd = None
             elif unrpyc_path == '__python_module__':
                 python_cmd = find_working_python_cmd()
                 cmd = python_cmd + ['-m', 'unrpyc', rpyc_path]
+                cwd = None
             elif unrpyc_path.endswith('.py'):
-                cmd = [sys.executable, unrpyc_path, rpyc_path]
+                # ВАЖНО: используем системный Python, не sys.executable!
+                python_cmd = find_working_python_cmd()
+                if not python_cmd:
+                    write_discovery_log("[RPYC] No system python for unrpyc")
+                    return False
+                cmd = python_cmd + [unrpyc_path, rpyc_path]
+                # unrpyc требует запуск из своей директории (там лежит modules/)
+                cwd = os.path.dirname(unrpyc_path)
             else:
                 cmd = [unrpyc_path, rpyc_path]
+                cwd = None
             
-            write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
-                os.path.basename(rpyc_path), os.path.basename(rpy_path)))
+            write_discovery_log("[RPYC] Decompiling: {}".format(os.path.basename(rpyc_path)))
             
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=60,
+                cwd=cwd
             )
             
             if result.returncode == 0:
                 if os.path.exists(rpy_path):
-                    write_discovery_log("[RPYC] Successfully decompiled: {}".format(os.path.basename(rpy_path)))
+                    write_discovery_log("[RPYC] OK: {}".format(os.path.basename(rpy_path)))
                     return True
                 else:
-                    write_discovery_log("[RPYC] unrpyc completed but .rpy not created")
+                    write_discovery_log("[RPYC] Completed but .rpy not created")
                     return False
             else:
-                write_discovery_log("[RPYC] unrpyc failed (code {}): {}".format(
-                    result.returncode, result.stderr[:200]))
+                write_discovery_log("[RPYC] Failed (code {}): {}".format(
+                    result.returncode, (result.stderr or result.stdout)[:300]))
                 return False
         
         except subprocess.TimeoutExpired:
-            write_discovery_log("[RPYC] Decompilation timeout: {}".format(os.path.basename(rpyc_path)))
+            write_discovery_log("[RPYC] Timeout: {}".format(os.path.basename(rpyc_path)))
             return False
         except Exception as e:
             write_discovery_log("[RPYC] Error: {}".format(e))
@@ -723,7 +738,8 @@ init python:
                     write_discovery_log("[RPA] Extraction completed, filtering scripts...")
                     
                     # ============================================================
-                    # ШАГ 4: Копируем только .rpy и .rpyc файлы в game/
+                    # ШАГ 4: Копируем только НОВЫЕ файлы + декомпилируем новые .rpyc
+                    # Пропускаем файлы, которые уже существуют в game/
                     # ============================================================
                     for temp_root, temp_dirs, temp_files in os.walk(temp_extract_dir):
                         for temp_file in temp_files:
@@ -734,14 +750,19 @@ init python:
                             rel_path = os.path.relpath(temp_path, temp_extract_dir)
                             target_path = os.path.join(config.gamedir, rel_path)
                             
+                            # Пропускаем файлы, которые уже существуют
+                            # (однократная распаковка + декомпиляция)
                             if os.path.exists(target_path):
                                 skipped_count += 1
+                                write_discovery_log("[RPA] Skipped (already exists): {}".format(rel_path))
                                 continue
                             
+                            # Создаём директории
                             target_dir = os.path.dirname(target_path)
                             if target_dir:
                                 os.makedirs(target_dir, exist_ok=True)
                             
+                            # Копируем файл
                             try:
                                 with open(temp_path, 'rb') as src:
                                     with open(target_path, 'wb') as dst:
@@ -751,6 +772,7 @@ init python:
                                 write_discovery_log("[RPA] Extracted: {} ({} bytes)".format(rel_path, size))
                                 extracted_count += 1
                                 
+                                # Декомпилируем только свежеизвлечённые .rpyc
                                 if temp_file.endswith('.rpyc') and DECOMPILE_RPYC and unrpyc_path:
                                     if decompile_rpyc_external(target_path, unrpyc_path):
                                         decompiled_count += 1
