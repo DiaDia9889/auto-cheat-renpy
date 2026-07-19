@@ -21,7 +21,7 @@ init python:
     UNRPA_PATH = os.environ.get('UNRPA_PATH', None)
 
     # Пакеты для установки через pip
-    PIP_PACKAGES = ['unrpa', 'unrpyc']
+    PIP_PACKAGES = ['unrpa']
 
     # =========================================================================
     # COLOR CONSTANTS
@@ -126,6 +126,66 @@ init python:
     # =========================================================================
     # PIP AUTO-INSTALLATION
     # =========================================================================
+    def download_unrpyc_from_github():
+        """Скачивает unrpyc с GitHub и распаковывает рядом с игрой.
+        
+        Скачивает ZIP-архив master-ветки и распаковывает в папку unrpyc/ рядом с игрой.
+        """
+        import urllib.request
+        import zipfile
+        import io
+        
+        unrpyc_dir = os.path.join(os.path.dirname(config.gamedir), 'unrpyc')
+        
+        if os.path.exists(unrpyc_dir):
+            # Проверяем, есть ли уже unrpyc.py
+            unrpyc_py = os.path.join(unrpyc_dir, 'unrpyc.py')
+            if os.path.exists(unrpyc_py):
+                write_discovery_log("[UNRPYC] Already exists at {}".format(unrpyc_py))
+                return unrpyc_py
+        
+        write_discovery_log("[UNRPYC] Downloading from GitHub...")
+        
+        try:
+            # URL для скачивания ZIP master-ветки
+            zip_url = 'https://github.com/CensoredUsername/unrpyc/archive/refs/heads/master.zip'
+            
+            write_discovery_log("[UNRPYC] Downloading: {}".format(zip_url))
+            
+            # Скачиваем ZIP
+            with urllib.request.urlopen(zip_url, timeout=60) as response:
+                zip_data = response.read()
+            
+            write_discovery_log("[UNRPYC] Downloaded {} bytes".format(len(zip_data)))
+            
+            # Распаковываем
+            with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+                # Получаем имя корневой папки в архиве (обычно unrpyc-master)
+                root_folder = zip_ref.namelist()[0].split('/')[0]
+                
+                # Извлекаем всё
+                zip_ref.extractall(os.path.dirname(config.gamedir))
+                
+                # Переименовываем unrpyc-master в unrpyc
+                extracted_dir = os.path.join(os.path.dirname(config.gamedir), root_folder)
+                if os.path.exists(extracted_dir):
+                    if os.path.exists(unrpyc_dir):
+                        import shutil
+                        shutil.rmtree(unrpyc_dir)
+                    os.rename(extracted_dir, unrpyc_dir)
+            
+            unrpyc_py = os.path.join(unrpyc_dir, 'unrpyc.py')
+            if os.path.exists(unrpyc_py):
+                write_discovery_log("[UNRPYC] Successfully downloaded to {}".format(unrpyc_py))
+                return unrpyc_py
+            else:
+                write_discovery_log("[UNRPYC] unrpyc.py not found after extraction")
+                return None
+        
+        except Exception as e:
+            write_discovery_log("[UNRPYC] Download failed: {}".format(e))
+            return None
+
     def _get_python_candidates():
         """Возвращает список возможных команд Python в зависимости от ОС."""
         if sys.platform == 'win32':
@@ -314,16 +374,7 @@ init python:
         return find_installed_package('unrpyc')
 
     def ensure_tools_installed():
-        """Главная функция: обеспечивает наличие unrpa и unrpyc.
-        
-        Логика:
-        1. Проверяет UNRPA_PATH и UNRPYC_PATH из env/констант
-        2. Ищет утилиты в стандартных локациях
-        3. Если не найдено — пытается установить через pip
-        4. Если pip недоступен — выводит инструкции
-        
-        Возвращает кортеж (unrpa_path, unrpyc_path)
-        """
+        """Главная функция: обеспечивает наличие unrpa и unrpyc."""
         global UNRPA_PATH, UNRPYC_PATH
         
         unrpa_found = None
@@ -345,7 +396,7 @@ init python:
         if not unrpyc_found:
             unrpyc_found = find_unrpyc()
         
-        # 3. Если что-то не найдено — пытаемся установить через pip
+        # 3. Если что-то не найдено
         missing_tools = []
         if not unrpa_found:
             missing_tools.append('unrpa')
@@ -359,37 +410,43 @@ init python:
             if not check_pip_available():
                 write_discovery_log("[TOOLS] " + "="*60)
                 write_discovery_log("[TOOLS] ERROR: pip is not available!")
-                write_discovery_log("[TOOLS] Cannot auto-install unrpa/unrpyc.")
+                write_discovery_log("[TOOLS] Cannot auto-install tools.")
                 write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] To install required tools manually:")
+                write_discovery_log("[TOOLS] Manual installation required:")
                 write_discovery_log("[TOOLS] ")
                 write_discovery_log("[TOOLS] 1. Install Python 3 from https://www.python.org/downloads/")
-                write_discovery_log("[TOOLS] 2. IMPORTANT: Check 'Add Python to PATH' during installation")
-                write_discovery_log("[TOOLS] 3. Open CMD/PowerShell and run:")
-                write_discovery_log("[TOOLS]      pip install unrpa unrpyc")
+                write_discovery_log("[TOOLS]    IMPORTANT: Check 'Add Python to PATH'")
                 write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] Or download manually:")
-                write_discovery_log("[TOOLS]   unrpa:   https://github.com/Lattyware/unrpa")
-                write_discovery_log("[TOOLS]   unrpyc:  https://github.com/CensoredUsername/unrpyc")
+                write_discovery_log("[TOOLS] 2. Install unrpa:")
+                write_discovery_log("[TOOLS]      pip install unrpa")
                 write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] Or set UNRPA_PATH and UNRPYC_PATH in environment variables")
+                write_discovery_log("[TOOLS] 3. Download unrpyc from:")
+                write_discovery_log("[TOOLS]      https://github.com/CensoredUsername/unrpyc")
+                write_discovery_log("[TOOLS]    Extract to: {}/unrpyc/".format(os.path.dirname(config.gamedir)))
+                write_discovery_log("[TOOLS] ")
+                write_discovery_log("[TOOLS] Or set UNRPA_PATH and UNRPYC_PATH environment variables")
                 write_discovery_log("[TOOLS] " + "="*60)
                 return (unrpa_found, unrpyc_found)
             
-            # Пытаемся установить недостающие пакеты
-            write_discovery_log("[TOOLS] Attempting to install missing packages via pip...")
-            
-            if install_packages_via_pip(PIP_PACKAGES):
-                write_discovery_log("[TOOLS] Packages installed, searching again...")
-                
-                # Повторный поиск после установки
-                if not unrpa_found:
+            # Устанавливаем unrpa через pip (он есть в PyPI)
+            if 'unrpa' in missing_tools:
+                write_discovery_log("[TOOLS] Installing unrpa via pip...")
+                if install_packages_via_pip(PIP_PACKAGES):
+                    write_discovery_log("[TOOLS] unrpa installed, searching again...")
                     unrpa_found = find_installed_unrpa()
-                
-                if not unrpyc_found:
-                    unrpyc_found = find_installed_unrpyc()
-            else:
-                write_discovery_log("[TOOLS] pip installation failed. Tools still missing.")
+                else:
+                    write_discovery_log("[TOOLS] unrpa installation failed")
+            
+            # Скачиваем unrpyc с GitHub (его нет в PyPI)
+            if 'unrpyc' in missing_tools:
+                write_discovery_log("[TOOLS] Downloading unrpyc from GitHub...")
+                downloaded_unrpyc = download_unrpyc_from_github()
+                if downloaded_unrpyc:
+                    unrpyc_found = downloaded_unrpyc
+                else:
+                    write_discovery_log("[TOOLS] unrpyc download failed")
+                    write_discovery_log("[TOOLS] Manual download required:")
+                    write_discovery_log("[TOOLS]   https://github.com/CensoredUsername/unrpyc")
         
         # 4. Финальный отчёт
         if unrpa_found:
