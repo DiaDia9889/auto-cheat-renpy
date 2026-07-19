@@ -1,6 +1,6 @@
 # Auto Cheat for Ren'Py - Universal Edition
 
-Version: 6.2 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7, 3.x | Tests: 104 passed
+Version: 7.0 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7, 3.x | Tests: 104 passed
 
 ---
 

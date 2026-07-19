@@ -1,3 +1,59 @@
+# Changelog
+
+## [7.0] — 2026-07-19
+### Added
+- **Automatic RPA Archive Extraction:** Implemented intelligent extraction system that automatically unpacks `.rpa` archives when few `.rpy` files are detected in `game/` directory (< 10 files). Scripts are extracted directly into `game/` with preserved directory structure, enabling seamless auto-discovery without manual intervention.
+- **External Tool Integration (unrpa & unrpyc):** Replaced error-prone in-house RPA parser with battle-tested external tools:
+  - **unrpa** — reliable extraction of RPA archives (supports versions 1.0, 2.0, 3.0, and exotic variants like ALT-1.0, ZiX-12A/B, RPA-3.2, RPA-4.0)
+  - **unrpyc** — professional decompilation of `.rpyc` files to readable `.rpy` format
+- **Automatic Tool Installation Pipeline:** Created intelligent tool resolution system with multiple fallback mechanisms:
+  - Checks environment variables `UNRPA_PATH` and `UNRPYC_PATH` for custom paths
+  - Searches standard locations next to game directory
+  - **Auto-installs unrpa via pip** (`pip install unrpa`) when not found
+  - **Auto-downloads unrpyc from GitHub** (not available in PyPI) and extracts to `unrpyc/` folder
+  - Provides detailed manual installation instructions in logs if all methods fail
+- **System Python Detection:** Implemented cross-platform Python discovery that:
+  - Detects system Python via PATH (tries `py -3`, `python`, `python3` based on OS)
+  - Avoids using Ren'Py's bundled `pythonw.exe` which lacks pip and required modules
+  - Caches detection results for optimal performance
+- **Smart Archive Pre-Scanning:** Added intelligent filtering that runs `unrpa -l` (with `--list` fallback) before extraction to:
+  - Verify archives contain `.rpy` or `.rpyc` files
+  - Skip asset-only archives (images, audio, fonts)
+  - Reduce unnecessary I/O operations
+- **Temporary Extraction Directory:** Implemented clean extraction workflow:
+  - Archives extracted to `_temp_rpa_extract_<archive>/` temporary directory
+  - Only script files (`.rpy`, `.rpyc`) copied to final locations in `game/`
+  - Temporary directory automatically cleaned up after processing
+- **Comprehensive Discovery Logging:** Added detailed logging system (`auto_cheat_parsing.log`) that tracks:
+  - Tool detection and installation attempts
+  - Archive listing and extraction progress
+  - Decompilation results and errors
+  - File sizes and extraction statistics
+
+### Changed
+- **One-Time Extraction Policy:** Implemented idempotent extraction where existing `.rpy`/`.rpyc` files are never overwritten. Users who need to re-extract simply delete the files manually, preventing accidental data loss.
+- **System Python Usage:** All subprocess calls for `unrpa`, `unrpyc`, and `pip` now use system Python found in PATH instead of Ren'Py's bundled Python, ensuring access to pip and required modules.
+- **Unified Package Discovery:** Replaced separate `find_installed_unrpa()` and `find_installed_unrpyc()` functions with single `find_installed_package(name)` that checks both direct CLI invocation and `python -m <package>` fallback, providing consistent behavior for any tool integration.
+- **Auto-Discovery Fallback:** Enhanced discovery system to automatically trigger RPA extraction when `game/` contains fewer than 10 `.rpy` files, eliminating manual archive unpacking requirement.
+- **Tool Search Priority:** Established clear resolution order: environment variables → local file search → pip install → GitHub download → manual installation instructions.
+
+### Fixed
+- **Decompilation Working Directory:** Fixed `unrpyc` module discovery by setting `cwd` parameter to the directory containing `unrpyc.py` when invoked as standalone script, resolving "module not found" errors.
+- **Existing Files Not Decompiling:** Resolved issue where `.rpyc` files already present in `game/` were skipped entirely and never decompiled. Decompilation step now runs independently of copy step, ensuring all new `.rpyc` files get their `.rpy` counterparts created.
+- **Stale Extraction Artifacts:** Improved cleanup reliability with proper `shutil.rmtree()` calls in both success and error paths, preventing disk clutter from interrupted extraction runs.
+- **Cross-Platform Python Detection:** Enhanced Python detection to try `py -3` first on Windows (official Python launcher convention) while preferring `python3` on Unix systems, matching each OS's typical PATH layout.
+- **Indentation Bugs in Discovery Functions:** Fixed critical indentation issues in `discover_label_changes()` and `discover_screen_choices()` where result blocks were incorrectly placed inside inner loops, causing premature data collection.
+- **Missing Import:** Added missing `import shutil` statement required for directory cleanup operations.
+
+### Deprecated
+- **In-house RPA Parser:** Removed custom XOR/zlib/fragment extraction code entirely. The implementation was error-prone (incorrect XOR byte order, missing zlib decompression step, single-fragment-only processing) and could not support newer RPA variants. The `unrpa` tool handles all RPA versions correctly and is actively maintained by the Ren'Py community.
+
+### Migration Notes
+- **For Users:** First launch may take longer as tools are automatically installed. Requires internet connection for automatic tool installation (or manual tool placement). Python 3.9+ must be installed and available in system PATH. Existing `.rpy`/`.rpyc` files in `game/` will not be overwritten.
+- **For Developers:** Environment variables `UNRPA_PATH` and `UNRPYC_PATH` can override automatic detection. Logs available in `game/auto_cheat_parsing.log` for troubleshooting. Temporary extraction directories use pattern `_temp_rpa_extract_*` and are auto-cleaned. Tool installation is idempotent and safe to run multiple times.
+
+---
+
 ## [6.2] — 2026-07-18
 ### Added
 - **Automatic Imagebutton Overlay System:** Implemented real-time overlay that automatically displays variable change hints on screens with imagebutton choices, eliminating the need to click a separate CHOICES button.
