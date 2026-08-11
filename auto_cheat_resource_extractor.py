@@ -28,9 +28,10 @@ parser.add_argument("--basedir", required=True, help="Path to the game's base di
 parser.add_argument("--log-file", required=True, help="Path to the discovery log file")
 args = parser.parse_args()
 
-CONFIG_GAMEDIR = args.gamedir
-CONFIG_BASEDIR = args.basedir
-DISCOVERY_LOG_PATH = args.log_file
+# ВАЖНО: Нормализуем пути, чтобы избежать проблем с os.path.exists
+CONFIG_GAMEDIR = os.path.abspath(args.gamedir)
+CONFIG_BASEDIR = os.path.abspath(args.basedir)
+DISCOVERY_LOG_PATH = os.path.abspath(args.log_file)
 
 UNRPYC_PATH = None
 UNRPA_PATH = None
@@ -41,11 +42,13 @@ DECOMPILE_RPYC = True
 # LOGGING & UTILS
 # =========================================================================
 def write_discovery_log(message):
+    msg = str(message)
+    print(msg)  # Дублируем в консоль
     try:
         with open(DISCOVERY_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(str(message) + "\n")
-    except:
-        pass
+            f.write(msg + "\n")
+    except Exception as e:
+        print("LOG ERROR:", e)
 
 def makedirs_compat(path, exist_ok=False):
     try:
@@ -163,9 +166,13 @@ def install_packages_via_pip(packages):
     if not python_cmd: return False
     try:
         cmd = python_cmd + ['-m', 'pip', 'install', '--upgrade', '--no-warn-script-location'] + packages
+        write_discovery_log("[PIP] Installing: {}".format(' '.join(cmd)))
         result = run_command(cmd, timeout=300)
+        if result.returncode != 0:
+            write_discovery_log("[PIP] Error: {}".format(result.stderr))
         return result.returncode == 0
-    except:
+    except Exception as e:
+        write_discovery_log("[PIP] Exception: {}".format(e))
         return False
 
 def find_installed_package(package_name):
@@ -218,6 +225,7 @@ def download_unrpyc_from_github():
 def find_unrpa():
     global UNRPA_PATH
     if UNRPA_PATH and os.path.exists(UNRPA_PATH): return UNRPA_PATH
+    
     search_paths = [
         os.path.join(CONFIG_BASEDIR, 'unrpa.py'),
         os.path.join(CONFIG_BASEDIR, 'unrpa', 'unrpa.py'),
@@ -225,15 +233,26 @@ def find_unrpa():
     ]
     if sys.platform == 'win32':
         search_paths.append(os.path.join(CONFIG_BASEDIR, 'unrpa.bat'))
+        
     for path in search_paths:
         if os.path.exists(path):
+            write_discovery_log("[DEBUG] Found local unrpa at: {}".format(path))
             UNRPA_PATH = path
             return path
+            
+    write_discovery_log("[DEBUG] Local unrpa not found. Checking system...")
+    installed = find_installed_unrpa()
+    if installed:
+        write_discovery_log("[DEBUG] Found installed unrpa: {}".format(installed))
+        UNRPA_PATH = installed
+        return installed
+        
     return None
 
 def find_unrpyc():
     global UNRPYC_PATH
     if UNRPYC_PATH and os.path.exists(UNRPYC_PATH): return UNRPYC_PATH
+    
     search_paths = [
         os.path.join(CONFIG_BASEDIR, 'unrpyc.py'),
         os.path.join(CONFIG_BASEDIR, 'unrpyc', 'unrpyc.py'),
@@ -241,16 +260,29 @@ def find_unrpyc():
     ]
     if sys.platform == 'win32':
         search_paths.append(os.path.join(CONFIG_BASEDIR, 'unrpyc.bat'))
+        
     for path in search_paths:
         if os.path.exists(path):
+            write_discovery_log("[DEBUG] Found local unrpyc at: {}".format(path))
             UNRPYC_PATH = path
             return path
+            
+    write_discovery_log("[DEBUG] Local unrpyc not found. Checking system...")
+    installed = find_installed_unrpyc()
+    if installed:
+        write_discovery_log("[DEBUG] Found installed unrpyc: {}".format(installed))
+        UNRPYC_PATH = installed
+        return installed
+        
     return None
 
 def ensure_tools_installed():
     global UNRPA_PATH, UNRPYC_PATH
-    unrpa_found = UNRPA_PATH if (UNRPA_PATH and os.path.exists(UNRPA_PATH)) else find_unrpa()
-    unrpyc_found = UNRPYC_PATH if (UNRPYC_PATH and os.path.exists(UNRPYC_PATH)) else find_unrpyc()
+    
+    write_discovery_log("[TOOLS] Checking for tools...")
+    
+    unrpa_found = find_unrpa()
+    unrpyc_found = find_unrpyc()
     
     missing_tools = []
     if not unrpa_found: missing_tools.append('unrpa')
@@ -391,6 +423,8 @@ def main():
     write_discovery_log("\n" + "="*50)
     write_discovery_log("RESOURCE EXTRACTOR SESSION STARTED")
     write_discovery_log("="*50)
+    write_discovery_log("[DEBUG] CONFIG_BASEDIR: {}".format(CONFIG_BASEDIR))
+    write_discovery_log("[DEBUG] CONFIG_GAMEDIR: {}".format(CONFIG_GAMEDIR))
     
     unrpa_path, unrpyc_path = ensure_tools_installed()
     
@@ -398,6 +432,12 @@ def main():
         write_discovery_log("[EXTRACTOR] Cannot extract .rpa archives without unrpa")
         return
     
+    write_discovery_log("[EXTRACTOR] Using unrpa: {}".format(unrpa_path))
+    if unrpyc_path:
+        write_discovery_log("[EXTRACTOR] Using unrpyc: {}".format(unrpyc_path))
+    else:
+        write_discovery_log("[EXTRACTOR] unrpyc not found, skipping decompilation.")
+        
     extracted = extract_rpa_scripts_only(unrpa_path, unrpyc_path)
     write_discovery_log("[EXTRACTOR] Extraction finished. Extracted {} files.".format(extracted))
     
