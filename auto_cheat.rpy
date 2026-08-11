@@ -9,6 +9,9 @@ init python:
     import zlib
     import subprocess
     import shutil
+    import glob
+    import threading
+    
 
     # =========================================================================
     # CONFIGURATION
@@ -40,6 +43,65 @@ init python:
     MAX_LOG_SIZE = 5 * 1024 * 1024
 
     DISCOVERY_LOG_PATH = os.path.join(config.gamedir, "auto_cheat_parsing.log")
+
+
+    def makedirs_compat(path, exist_ok=False):
+        """Совместимая с Python 2.7 версия os.makedirs с параметром exist_ok."""
+        try:
+            os.makedirs(path)
+        except OSError:
+            if not exist_ok or not os.path.isdir(path):
+                raise
+
+    class SubprocessResult:
+        """Эмуляция объекта, возвращаемого subprocess.run"""
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def run_command(cmd, timeout=None, cwd=None):
+        """
+        Кроссплатформенный аналог subprocess.run (capture_output=True, text=True).
+        Работает в Python 2.7 (внутри Ren'Py 7) и Python 3.x.
+        """
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=cwd
+            )
+            
+            # Таймер для эмуляции timeout, так как в Python 2 Popen.communicate() не поддерживает timeout
+            timer = None
+            if timeout is not None:
+                def kill_proc():
+                    if proc.poll() is None:
+                        try:
+                            proc.kill()
+                        except:
+                            pass
+                timer = threading.Timer(timeout, kill_proc)
+                timer.start()
+                
+            try:
+                stdout, stderr = proc.communicate()
+            finally:
+                if timer is not None:
+                    timer.cancel()
+                    
+            # Декодируем байты в текст (utf-8)
+            encoding = 'utf-8'
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode(encoding, errors='replace')
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(encoding, errors='replace')
+                
+            return SubprocessResult(proc.returncode, stdout, stderr)
+            
+        except Exception as e:
+            return SubprocessResult(-1, "", str(e))
 
     def read_file_text(filepath):
         try:
@@ -190,11 +252,27 @@ init python:
     def _get_python_candidates():
         """Возвращает список возможных команд Python в зависимости от ОС."""
         if sys.platform == 'win32':
-            return [
-                ['py', '-3'],      # Windows py launcher (предпочтительный)
-                ['python'],
-                ['python3'],
+            candidates = [
+                ['py', '-3'],           # Windows py launcher (предпочтительный)
+                ['python3'],            # Явно Python 3
+                ['python'],             # Может быть Python 3
             ]
+            
+            # Добавляем стандартные пути установки Python на Windows
+            common_patterns = [
+                r'C:\Python3*\python.exe',
+                r'C:\Users\*\AppData\Local\Programs\Python\Python3*\python.exe',
+                r'C:\users\*\AppData\Local\Programs\Python\Python3*\python.exe',
+                r'C:\Program Files\Python3*\python.exe',
+                r'C:\Program Files (x86)\Python3*\python.exe',
+            ]
+            
+            for pattern in common_patterns:
+                matches = glob.glob(pattern)
+                for match in matches:
+                    candidates.insert(0, [match])  # Вставляем в начало списка
+            
+            return candidates
         else:
             return [
                 ['python3'],
@@ -202,33 +280,53 @@ init python:
             ]
 
     def find_working_python_cmd():
-        """Находит первую рабочую команду Python через системный PATH.
+        """Находит первую рабочую команду Python 3 через системный PATH.
         
         Возвращает список аргументов (например ['python3'] или ['py', '-3'])
         или None если ничего не найдено.
+        
+        Использует subprocess.Popen для совместимости с Python 2.7 (Ren'Py).
         """
         cache_attr = '_working_python_cmd'
         if hasattr(find_working_python_cmd, cache_attr):
             return getattr(find_working_python_cmd, cache_attr)
         
-        for candidate in _get_python_candidates():
+        candidates = _get_python_candidates()
+        
+        for candidate in candidates:
             try:
-                result = subprocess.run(
+                # Используем Popen для совместимости с Python 2.7
+                proc = subprocess.Popen(
                     candidate + ['--version'],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
                 )
-                if result.returncode == 0:
-                    version = (result.stdout.strip() or result.stderr.strip())
-                    write_discovery_log("[PYTHON] Working command: {} ({})".format(' '.join(candidate), version))
-                    setattr(find_working_python_cmd, cache_attr, candidate)
-                    return candidate
+                
+                try:
+                    stdout, stderr = proc.communicate(timeout=10)
+                except TypeError:
+                    # Python 2.7 не поддерживает timeout в communicate()
+                    stdout, stderr = proc.communicate()
+                
+                # Декодируем вывод
+                version_output = (stdout.decode('utf-8', errors='ignore').strip() or 
+                                stderr.decode('utf-8', errors='ignore').strip())
+                
+                if proc.returncode == 0:
+                    # Проверяем что это Python 3.x
+                    if 'Python 3.' in version_output:
+                        write_discovery_log("[PYTHON] Working Python 3 command: {} ({})".format(
+                            ' '.join(candidate), version_output))
+                        setattr(find_working_python_cmd, cache_attr, candidate)
+                        return candidate
+                    else:
+                        write_discovery_log("[PYTHON] Skipping Python 2: {} ({})".format(
+                            ' '.join(candidate), version_output))
             except Exception as e:
                 write_discovery_log("[PYTHON] {} failed: {}".format(' '.join(candidate), e))
                 continue
         
-        write_discovery_log("[PYTHON] No working python command found in PATH")
+        write_discovery_log("[PYTHON] No working Python 3 command found in PATH")
         setattr(find_working_python_cmd, cache_attr, None)
         return None
 
@@ -240,21 +338,16 @@ init python:
             return False
         
         try:
-            result = subprocess.run(
-                python_cmd + ['-m', 'pip', '--version'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
+            result = run_command(python_cmd + ['-m', 'pip', '--version'], timeout=15)
             if result.returncode == 0:
                 write_discovery_log("[PIP] pip available: {}".format(result.stdout.strip()))
                 return True
             else:
                 write_discovery_log("[PIP] pip check failed: {}".format(result.stderr.strip()[:200]))
                 return False
-        except subprocess.TimeoutExpired:
-            write_discovery_log("[PIP] pip check timeout")
-            return False
+        #except subprocess.TimeoutExpired:
+        #    write_discovery_log("[PIP] pip check timeout")
+        #    return False
         except Exception as e:
             write_discovery_log("[PIP] Cannot check pip: {}".format(e))
             return False
@@ -275,12 +368,7 @@ init python:
             cmd = python_cmd + ['-m', 'pip', 'install', '--upgrade', '--no-warn-script-location'] + packages
             write_discovery_log("[PIP] Command: {}".format(' '.join(cmd)))
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
+            result = run_command(cmd, timeout=300)
             
             if result.returncode == 0:
                 write_discovery_log("[PIP] Installation successful!")
@@ -305,12 +393,7 @@ init python:
     def _cmd_available(cmd):
         """Проверяет, доступна ли команда через PATH."""
         try:
-            result = subprocess.run(
-                cmd + ['--help'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
+            result = run_command(cmd + ['--help'], timeout=15)
             # returncode 0 или наличие 'usage' в выводе = команда работает
             return result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower()
         except Exception:
@@ -335,12 +418,7 @@ init python:
         
         # 1. Проверяем команду напрямую через PATH
         try:
-            result = subprocess.run(
-                [package_name, '--help'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
+            result = run_command([package_name, '--help'], timeout=15)
             if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
                 write_discovery_log("[{}] Found {} in system PATH".format(pkg_upper, package_name))
                 return package_name
@@ -351,12 +429,7 @@ init python:
         python_cmd = find_working_python_cmd()
         if python_cmd:
             try:
-                result = subprocess.run(
-                    python_cmd + ['-m', package_name, '--help'],
-                    capture_output=True,
-                    text=True,
-                    timeout=15
-                )
+                result = run_command(python_cmd + ['-m', package_name, '--help'], timeout=15)
                 if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
                     write_discovery_log("[{}] {} available via {} -m {}".format(
                         pkg_upper, package_name, ' '.join(python_cmd), package_name))
@@ -592,13 +665,7 @@ init python:
             write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
                 os.path.basename(rpyc_path), os.path.basename(rpy_path)))
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd=cwd
-            )
+            result = run_command(cmd, timeout=60, cwd=cwd)
             
             if result.returncode == 0:
                 if os.path.exists(rpy_path):
@@ -656,12 +723,7 @@ init python:
                 try:
                     cmd = build_unrpa_cmd(unrpa_path, ['-l', rpa_path])
                     
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=30
-                    )
+                    result = run_command(cmd, timeout=30)
                     
                     if result.returncode == 0:
                         file_list_output = result.stdout
@@ -669,7 +731,7 @@ init python:
                         write_discovery_log("[RPA] unrpa -l failed (code {}): {}".format(result.returncode, result.stderr[:200]))
                         # Fallback на --list
                         cmd = build_unrpa_cmd(unrpa_path, ['--list', rpa_path])
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                        result = run_command(cmd, timeout=30)
                         if result.returncode == 0:
                             file_list_output = result.stdout
                         else:
@@ -713,19 +775,14 @@ init python:
                     if os.path.exists(temp_extract_dir):
                         import shutil
                         shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    os.makedirs(temp_extract_dir, exist_ok=True)
+                    makedirs_compat(temp_extract_dir, exist_ok=True)
                     
                     write_discovery_log("[RPA] Extracting {} to temporary directory...".format(file))
                     
                     # unrpa извлекает весь архив, поэтому используем временную папку
                     cmd = build_unrpa_cmd(unrpa_path, ['-mp', temp_extract_dir, rpa_path])
                     
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=120
-                    )
+                    result = run_command(cmd, timeout=120)
                     
                     if result.returncode != 0:
                         write_discovery_log("[RPA] unrpa extraction failed: {}".format(result.stderr[:200]))
@@ -758,7 +815,7 @@ init python:
                             # Создаём директории
                             target_dir = os.path.dirname(target_path)
                             if target_dir:
-                                os.makedirs(target_dir, exist_ok=True)
+                                makedirs_compat(target_dir, exist_ok=True)
                             
                             # Копируем файл
                             try:

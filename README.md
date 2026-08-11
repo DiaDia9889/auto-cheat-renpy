@@ -1,6 +1,6 @@
 # Auto Cheat for Ren'Py - Universal Edition
 
-Version: 7.0 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7, 3.x | Tests: 104 passed
+Version: 7.0.1 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7, 3.x
 
 ---
 
@@ -26,7 +26,6 @@ Smart auto-cheat for Ren'Py visual novels that automatically analyzes game code 
 - **Flexible JSON configuration**
 - **Detailed logs** for debugging (auto_cheat.log + auto_cheat_parsing.log)
 - **Compatible** with Ren'Py 6.99, 7.x, 8.x
-- **104 unit tests**
 
 ## Installation
 
@@ -227,8 +226,6 @@ Player sees:
 - Ren'Py 8.0+ with Python 3.9+ - Full support
 
 ## Testing
-
-104 unit and integration tests included.
 
 To run tests:
 
@@ -437,8 +434,6 @@ Overlay появляется автоматически - не нужно наж
 - Ren'Py 8.0+ с Python 3.9+ - Полная поддержка
 
 ## Тестирование
-
-Включено 104 юнит- и интеграционных теста.
 
 Для запуска:
 

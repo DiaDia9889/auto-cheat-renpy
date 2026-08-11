@@ -1,5 +1,24 @@
 # Changelog
 
+## [7.0.1] — 2026-07-19
+### Added
+- **`run_command()` + `CommandResult`:** Python 2.7 compatible replacement for `subprocess.run()` (which doesn't exist in Ren'Py's runtime). All subprocess calls now use this abstraction.
+- **`makedirs_compat()`:** Wrapper around `os.makedirs()` emulating the `exist_ok` parameter (Python 3.2+) for Python 2.7 compatibility.
+- **Standard Path Python Discovery:** Added `glob`-based scanning of common Windows install locations (`C:\Python3*\`, `AppData\Local\Programs\Python\Python3*\`, `Program Files\Python3*\`) so system Python is found even when not in `PATH`.
+
+### Changed
+- **Subprocess Abstraction:** All `subprocess.run()` calls replaced with `run_command()` across tool detection, pip installation, archive extraction, and decompilation functions.
+- **Python 3 Explicit Filtering:** `find_working_python_cmd()` now checks `--version` output and rejects Python 2.x interpreters, preventing Ren'Py's bundled Python 2.7 from being selected.
+
+### Fixed
+- **`'module' object has no attribute 'run'`:** Resolved crash caused by using `subprocess.run()` (Python 3.5+) inside Ren'Py's Python 2.7 runtime.
+- **`makedirs() got an unexpected keyword argument 'exist_ok'`:** Resolved crash during RPA extraction on Python 2.7.
+- **`Could not import runpy module`:** Eliminated error spam caused by Python 2.7 being mistakenly used as system interpreter for pip checks.
+- **`communicate(timeout=...)` TypeError:** Added fallback for Python 2.7 where `Popen.communicate()` has no `timeout` parameter.
+- **Console window flash:** Suppressed console windows on Windows via `STARTF_USESHOWWINDOW` in `run_command()`.
+
+---
+
 ## [7.0] — 2026-07-19
 ### Added
 - **Automatic RPA Archive Extraction:** Implemented intelligent extraction system that automatically unpacks `.rpa` archives when few `.rpy` files are detected in `game/` directory (< 10 files). Scripts are extracted directly into `game/` with preserved directory structure, enabling seamless auto-discovery without manual intervention.
