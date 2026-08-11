@@ -12,20 +12,12 @@ init python:
     import glob
     import threading
     
-
     # =========================================================================
     # CONFIGURATION
     # =========================================================================
     DEBUG_MODE = True
     DISCOVER_USED_VARIABLES = False
     FONT_SIZE_MODIFIER = -4
-    DECOMPILE_RPYC = True  # Включить декомпиляцию .rpyc файлов
-
-    UNRPYC_PATH = os.environ.get('UNRPYC_PATH', None)
-    UNRPA_PATH = os.environ.get('UNRPA_PATH', None)
-
-    # Пакеты для установки через pip
-    PIP_PACKAGES = ['unrpa']
 
     # =========================================================================
     # COLOR CONSTANTS
@@ -44,7 +36,6 @@ init python:
 
     DISCOVERY_LOG_PATH = os.path.join(config.gamedir, "auto_cheat_parsing.log")
 
-
     def makedirs_compat(path, exist_ok=False):
         """Совместимая с Python 2.7 версия os.makedirs с параметром exist_ok."""
         try:
@@ -61,10 +52,7 @@ init python:
             self.stderr = stderr
 
     def run_command(cmd, timeout=None, cwd=None):
-        """
-        Кроссплатформенный аналог subprocess.run (capture_output=True, text=True).
-        Работает в Python 2.7 (внутри Ren'Py 7) и Python 3.x.
-        """
+        """Кроссплатформенный аналог subprocess.run."""
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -73,7 +61,6 @@ init python:
                 cwd=cwd
             )
             
-            # Таймер для эмуляции timeout, так как в Python 2 Popen.communicate() не поддерживает timeout
             timer = None
             if timeout is not None:
                 def kill_proc():
@@ -91,7 +78,6 @@ init python:
                 if timer is not None:
                     timer.cancel()
                     
-            # Декодируем байты в текст (utf-8)
             encoding = 'utf-8'
             if isinstance(stdout, bytes):
                 stdout = stdout.decode(encoding, errors='replace')
@@ -187,68 +173,8 @@ init python:
     TAG_PATTERN = re.compile(r'\{[^}]*\}')
 
     # =========================================================================
-    # PIP AUTO-INSTALLATION
+    # PYTHON 3 DISCOVERY (Для запуска внешнего скрипта)
     # =========================================================================
-    def download_unrpyc_from_github():
-        """Скачивает unrpyc с GitHub и распаковывает рядом с игрой.
-        
-        Скачивает ZIP-архив master-ветки и распаковывает в папку unrpyc/ рядом с игрой.
-        """
-        import urllib.request
-        import zipfile
-        import io
-        
-        unrpyc_dir = os.path.join(os.path.dirname(config.gamedir), 'unrpyc')
-        
-        if os.path.exists(unrpyc_dir):
-            # Проверяем, есть ли уже unrpyc.py
-            unrpyc_py = os.path.join(unrpyc_dir, 'unrpyc.py')
-            if os.path.exists(unrpyc_py):
-                write_discovery_log("[UNRPYC] Already exists at {}".format(unrpyc_py))
-                return unrpyc_py
-        
-        write_discovery_log("[UNRPYC] Downloading from GitHub...")
-        
-        try:
-            # URL для скачивания ZIP master-ветки
-            zip_url = 'https://github.com/CensoredUsername/unrpyc/archive/refs/heads/master.zip'
-            
-            write_discovery_log("[UNRPYC] Downloading: {}".format(zip_url))
-            
-            # Скачиваем ZIP
-            with urllib.request.urlopen(zip_url, timeout=60) as response:
-                zip_data = response.read()
-            
-            write_discovery_log("[UNRPYC] Downloaded {} bytes".format(len(zip_data)))
-            
-            # Распаковываем
-            with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
-                # Получаем имя корневой папки в архиве (обычно unrpyc-master)
-                root_folder = zip_ref.namelist()[0].split('/')[0]
-                
-                # Извлекаем всё
-                zip_ref.extractall(os.path.dirname(config.gamedir))
-                
-                # Переименовываем unrpyc-master в unrpyc
-                extracted_dir = os.path.join(os.path.dirname(config.gamedir), root_folder)
-                if os.path.exists(extracted_dir):
-                    if os.path.exists(unrpyc_dir):
-                        import shutil
-                        shutil.rmtree(unrpyc_dir)
-                    os.rename(extracted_dir, unrpyc_dir)
-            
-            unrpyc_py = os.path.join(unrpyc_dir, 'unrpyc.py')
-            if os.path.exists(unrpyc_py):
-                write_discovery_log("[UNRPYC] Successfully downloaded to {}".format(unrpyc_py))
-                return unrpyc_py
-            else:
-                write_discovery_log("[UNRPYC] unrpyc.py not found after extraction")
-                return None
-        
-        except Exception as e:
-            write_discovery_log("[UNRPYC] Download failed: {}".format(e))
-            return None
-
     def _get_python_candidates():
         """Возвращает список возможных команд Python в зависимости от ОС."""
         if sys.platform == 'win32':
@@ -257,8 +183,6 @@ init python:
                 ['python3'],            # Явно Python 3
                 ['python'],             # Может быть Python 3
             ]
-            
-            # Добавляем стандартные пути установки Python на Windows
             common_patterns = [
                 r'C:\Python3*\python.exe',
                 r'C:\Users\*\AppData\Local\Programs\Python\Python3*\python.exe',
@@ -266,12 +190,10 @@ init python:
                 r'C:\Program Files\Python3*\python.exe',
                 r'C:\Program Files (x86)\Python3*\python.exe',
             ]
-            
             for pattern in common_patterns:
                 matches = glob.glob(pattern)
                 for match in matches:
-                    candidates.insert(0, [match])  # Вставляем в начало списка
-            
+                    candidates.insert(0, [match])
             return candidates
         else:
             return [
@@ -280,13 +202,7 @@ init python:
             ]
 
     def find_working_python_cmd():
-        """Находит первую рабочую команду Python 3 через системный PATH.
-        
-        Возвращает список аргументов (например ['python3'] или ['py', '-3'])
-        или None если ничего не найдено.
-        
-        Использует subprocess.Popen для совместимости с Python 2.7 (Ren'Py).
-        """
+        """Находит первую рабочую команду Python 3 через системный PATH."""
         cache_attr = '_working_python_cmd'
         if hasattr(find_working_python_cmd, cache_attr):
             return getattr(find_working_python_cmd, cache_attr)
@@ -295,33 +211,25 @@ init python:
         
         for candidate in candidates:
             try:
-                # Используем Popen для совместимости с Python 2.7
                 proc = subprocess.Popen(
                     candidate + ['--version'],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                
                 try:
                     stdout, stderr = proc.communicate(timeout=10)
                 except TypeError:
-                    # Python 2.7 не поддерживает timeout в communicate()
                     stdout, stderr = proc.communicate()
                 
-                # Декодируем вывод
                 version_output = (stdout.decode('utf-8', errors='ignore').strip() or 
                                 stderr.decode('utf-8', errors='ignore').strip())
                 
                 if proc.returncode == 0:
-                    # Проверяем что это Python 3.x
                     if 'Python 3.' in version_output:
                         write_discovery_log("[PYTHON] Working Python 3 command: {} ({})".format(
                             ' '.join(candidate), version_output))
                         setattr(find_working_python_cmd, cache_attr, candidate)
                         return candidate
-                    else:
-                        write_discovery_log("[PYTHON] Skipping Python 2: {} ({})".format(
-                            ' '.join(candidate), version_output))
             except Exception as e:
                 write_discovery_log("[PYTHON] {} failed: {}".format(' '.join(candidate), e))
                 continue
@@ -330,525 +238,64 @@ init python:
         setattr(find_working_python_cmd, cache_attr, None)
         return None
 
-    def check_pip_available():
-        """Проверяет наличие pip через системный PATH."""
+    def run_resource_extractor():
+        """Запускает внешний скрипт auto_cheat_resource_extractor.py в Python 3."""
+        extractor_script = os.path.join(config.gamedir, "auto_cheat_resource_extractor.py")
+        
+        if not os.path.exists(extractor_script):
+            write_discovery_log("[INIT] ERROR: auto_cheat_resource_extractor.py not found at {}".format(extractor_script))
+            write_discovery_log("[INIT] Please place auto_cheat_resource_extractor.py in the game directory.")
+            return False
+
         python_cmd = find_working_python_cmd()
         if not python_cmd:
-            write_discovery_log("[PIP] No python command available")
-            return False
-        
-        try:
-            result = run_command(python_cmd + ['-m', 'pip', '--version'], timeout=15)
-            if result.returncode == 0:
-                write_discovery_log("[PIP] pip available: {}".format(result.stdout.strip()))
-                return True
-            else:
-                write_discovery_log("[PIP] pip check failed: {}".format(result.stderr.strip()[:200]))
-                return False
-        #except subprocess.TimeoutExpired:
-        #    write_discovery_log("[PIP] pip check timeout")
-        #    return False
-        except Exception as e:
-            write_discovery_log("[PIP] Cannot check pip: {}".format(e))
+            write_discovery_log("[INIT] ERROR: No Python 3 found to run resource extractor.")
+            write_discovery_log("[INIT] Please install Python 3 and add его в PATH.")
             return False
 
-    def install_packages_via_pip(packages):
-        """Устанавливает пакеты через pip, используя системный PATH."""
-        if not packages:
-            return True
-        
-        python_cmd = find_working_python_cmd()
-        if not python_cmd:
-            write_discovery_log("[PIP] Cannot install: no python command")
-            return False
-        
-        write_discovery_log("[PIP] Installing via {}: {}".format(' '.join(python_cmd), ', '.join(packages)))
-        
-        try:
-            cmd = python_cmd + ['-m', 'pip', 'install', '--upgrade', '--no-warn-script-location'] + packages
-            write_discovery_log("[PIP] Command: {}".format(' '.join(cmd)))
-            
-            result = run_command(cmd, timeout=300)
-            
-            if result.returncode == 0:
-                write_discovery_log("[PIP] Installation successful!")
-                if result.stdout:
-                    lines = result.stdout.strip().split('\n')
-                    for line in lines[-5:]:
-                        write_discovery_log("[PIP] " + line)
-                return True
-            else:
-                write_discovery_log("[PIP] Installation failed (code {}):".format(result.returncode))
-                if result.stderr:
-                    write_discovery_log("[PIP] " + result.stderr[:500])
-                return False
-        
-        except subprocess.TimeoutExpired:
-            write_discovery_log("[PIP] Installation timeout (300s)")
-            return False
-        except Exception as e:
-            write_discovery_log("[PIP] Error during installation: {}".format(e))
-            return False
-
-    def _cmd_available(cmd):
-        """Проверяет, доступна ли команда через PATH."""
-        try:
-            result = run_command(cmd + ['--help'], timeout=15)
-            # returncode 0 или наличие 'usage' в выводе = команда работает
-            return result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower()
-        except Exception:
-            return False
-
-    def find_installed_package(package_name):
-        """Универсальный поиск установленного пакета через PATH.
-        
-        Проверяет два способа вызова:
-        1. Команда напрямую: {package_name} --help
-        2. Через python: python -m {package_name} --help
-        
-        Args:
-            package_name: Имя пакета ('unrpa' или 'unrpyc')
-            
-        Returns:
-            - '{package_name}' если доступна команда напрямую
-            - '__python_module__' если доступен через python -m
-            - None если ничего не найдено
-        """
-        pkg_upper = package_name.upper()
-        
-        # 1. Проверяем команду напрямую через PATH
-        try:
-            result = run_command([package_name, '--help'], timeout=15)
-            if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
-                write_discovery_log("[{}] Found {} in system PATH".format(pkg_upper, package_name))
-                return package_name
-        except Exception:
-            pass
-        
-        # 2. Проверяем через python -m
-        python_cmd = find_working_python_cmd()
-        if python_cmd:
-            try:
-                result = run_command(python_cmd + ['-m', package_name, '--help'], timeout=15)
-                if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
-                    write_discovery_log("[{}] {} available via {} -m {}".format(
-                        pkg_upper, package_name, ' '.join(python_cmd), package_name))
-                    return '__python_module__'
-            except Exception:
-                pass
-        
-        return None
-
-    def find_installed_unrpa():
-        """Ищет unrpa через системный PATH."""
-        return find_installed_package('unrpa')
-
-    def find_installed_unrpyc():
-        """Ищет unrpyc через системный PATH."""
-        return find_installed_package('unrpyc')
-
-    def ensure_tools_installed():
-        """Главная функция: обеспечивает наличие unrpa и unrpyc."""
-        global UNRPA_PATH, UNRPYC_PATH
-        
-        unrpa_found = None
-        unrpyc_found = None
-        
-        # 1. Проверяем env/константы
-        if UNRPA_PATH and os.path.exists(UNRPA_PATH):
-            write_discovery_log("[TOOLS] Using UNRPA_PATH: {}".format(UNRPA_PATH))
-            unrpa_found = UNRPA_PATH
-        
-        if UNRPYC_PATH and os.path.exists(UNRPYC_PATH):
-            write_discovery_log("[TOOLS] Using UNRPYC_PATH: {}".format(UNRPYC_PATH))
-            unrpyc_found = UNRPYC_PATH
-        
-        # 2. Автопоиск в стандартных локациях
-        if not unrpa_found:
-            unrpa_found = find_unrpa()
-        
-        if not unrpyc_found:
-            unrpyc_found = find_unrpyc()
-        
-        # 3. Если что-то не найдено
-        missing_tools = []
-        if not unrpa_found:
-            missing_tools.append('unrpa')
-        if not unrpyc_found:
-            missing_tools.append('unrpyc')
-        
-        if missing_tools:
-            write_discovery_log("[TOOLS] Missing: {}".format(', '.join(missing_tools)))
-            
-            # Проверяем pip
-            if not check_pip_available():
-                write_discovery_log("[TOOLS] " + "="*60)
-                write_discovery_log("[TOOLS] ERROR: pip is not available!")
-                write_discovery_log("[TOOLS] Cannot auto-install tools.")
-                write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] Manual installation required:")
-                write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] 1. Install Python 3 from https://www.python.org/downloads/")
-                write_discovery_log("[TOOLS]    IMPORTANT: Check 'Add Python to PATH'")
-                write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] 2. Install unrpa:")
-                write_discovery_log("[TOOLS]      pip install unrpa")
-                write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] 3. Download unrpyc from:")
-                write_discovery_log("[TOOLS]      https://github.com/CensoredUsername/unrpyc")
-                write_discovery_log("[TOOLS]    Extract to: {}/unrpyc/".format(os.path.dirname(config.gamedir)))
-                write_discovery_log("[TOOLS] ")
-                write_discovery_log("[TOOLS] Or set UNRPA_PATH and UNRPYC_PATH environment variables")
-                write_discovery_log("[TOOLS] " + "="*60)
-                return (unrpa_found, unrpyc_found)
-            
-            # Устанавливаем unrpa через pip (он есть в PyPI)
-            if 'unrpa' in missing_tools:
-                write_discovery_log("[TOOLS] Installing unrpa via pip...")
-                if install_packages_via_pip(PIP_PACKAGES):
-                    write_discovery_log("[TOOLS] unrpa installed, searching again...")
-                    unrpa_found = find_installed_unrpa()
-                else:
-                    write_discovery_log("[TOOLS] unrpa installation failed")
-            
-            # Скачиваем unrpyc с GitHub (его нет в PyPI)
-            if 'unrpyc' in missing_tools:
-                write_discovery_log("[TOOLS] Downloading unrpyc from GitHub...")
-                downloaded_unrpyc = download_unrpyc_from_github()
-                if downloaded_unrpyc:
-                    unrpyc_found = downloaded_unrpyc
-                else:
-                    write_discovery_log("[TOOLS] unrpyc download failed")
-                    write_discovery_log("[TOOLS] Manual download required:")
-                    write_discovery_log("[TOOLS]   https://github.com/CensoredUsername/unrpyc")
-        
-        # 4. Финальный отчёт
-        if unrpa_found:
-            write_discovery_log("[TOOLS] ✓ unrpa: {}".format(unrpa_found))
-        else:
-            write_discovery_log("[TOOLS] ✗ unrpa: NOT FOUND")
-        
-        if unrpyc_found:
-            write_discovery_log("[TOOLS] ✓ unrpyc: {}".format(unrpyc_found))
-        else:
-            write_discovery_log("[TOOLS] ✗ unrpyc: NOT FOUND")
-        
-        return (unrpa_found, unrpyc_found)
-
-    # =========================================================================
-    # UNRPA EXTERNAL TOOL INTEGRATION
-    # =========================================================================
-    def find_unrpa():
-        """Ищет CLI-утилиту unrpa в стандартных локациях.
-        
-        Возвращает полный путь к unrpa или None.
-        """
-        global UNRPA_PATH
-        
-        if UNRPA_PATH and os.path.exists(UNRPA_PATH):
-            return UNRPA_PATH
-        
-        base_dir = os.path.dirname(config.gamedir)
-        
-        search_paths = [
-            os.path.join(base_dir, 'unrpa.py'),
-            os.path.join(base_dir, 'unrpa', 'unrpa.py'),
-            os.path.join(base_dir, 'unrpa', 'src', 'unrpa.py'),
-            os.path.join(base_dir, 'tools', 'unrpa.py'),
-            os.path.join(base_dir, 'tools', 'unrpa', 'unrpa.py'),
+        cmd = python_cmd + [
+            extractor_script,
+            "--gamedir", config.gamedir,
+            "--basedir", os.path.dirname(config.gamedir),
+            "--log-file", DISCOVERY_LOG_PATH
         ]
         
-        if sys.platform == 'win32':
-            search_paths.extend([
-                os.path.join(base_dir, 'unrpa.bat'),
-                os.path.join(base_dir, 'unrpa', 'unrpa.bat'),
-            ])
-        else:
-            search_paths.extend([
-                os.path.join(base_dir, 'unrpa.sh'),
-                os.path.join(base_dir, 'unrpa', 'unrpa.sh'),
-            ])
-        
-        for path in search_paths:
-            if os.path.exists(path):
-                write_discovery_log("[UNRPA] Found unrpa CLI at: {}".format(path))
-                UNRPA_PATH = path
-                return path
-        
-        return None
-    # =========================================================================
-    # UNRPYC EXTERNAL TOOL INTEGRATION
-    # =========================================================================
-    def find_unrpyc():
-        """Ищет утилиту unrpyc в стандартных локациях.
-        
-        Возвращает полный путь к unrpyc или None.
-        """
-        global UNRPYC_PATH
-        
-        if UNRPYC_PATH and os.path.exists(UNRPYC_PATH):
-            return UNRPYC_PATH
-        
-        base_dir = os.path.dirname(config.gamedir)
-        
-        search_paths = [
-            os.path.join(base_dir, 'unrpyc.py'),
-            os.path.join(base_dir, 'unrpyc', 'unrpyc.py'),
-            os.path.join(base_dir, 'unrpyc', 'src', 'unrpyc.py'),
-            os.path.join(base_dir, 'tools', 'unrpyc.py'),
-            os.path.join(base_dir, 'tools', 'unrpyc', 'unrpyc.py'),
-        ]
-        
-        if sys.platform == 'win32':
-            search_paths.extend([
-                os.path.join(base_dir, 'unrpyc.bat'),
-                os.path.join(base_dir, 'unrpyc', 'unrpyc.bat'),
-            ])
-        else:
-            search_paths.extend([
-                os.path.join(base_dir, 'unrpyc.sh'),
-                os.path.join(base_dir, 'unrpyc', 'unrpyc.sh'),
-            ])
-        
-        for path in search_paths:
-            if os.path.exists(path):
-                write_discovery_log("[UNRPYC] Found unrpyc at: {}".format(path))
-                UNRPYC_PATH = path
-                return path
-        
-        return None
-
-
-    def build_unrpa_cmd(unrpa_path, extra_args):
-        """Строит команду для запуска unrpa."""
-        if unrpa_path == 'unrpa':
-            # Команда из PATH
-            return ['unrpa'] + extra_args
-        elif unrpa_path == '__python_module__':
-            python_cmd = find_working_python_cmd()
-            return python_cmd + ['-m', 'unrpa'] + extra_args
-        elif unrpa_path.endswith('.py'):
-            return [sys.executable, unrpa_path] + extra_args
-        else:
-            return [unrpa_path] + extra_args
-
-    def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
-        """Декомпилирует .rpyc файл используя unrpyc."""
-        if not unrpyc_path:
-            return False
-        
-        rpy_path = rpyc_path[:-1]  # .rpyc -> .rpy
+        write_discovery_log("[INIT] Running resource extractor: {}".format(' '.join(cmd)))
         
         try:
-            # Определяем команду
-            if unrpyc_path == 'unrpyc':
-                # Команда из PATH
-                cmd = ['unrpyc', rpyc_path]
-                cwd = None
-            elif unrpyc_path == '__python_module__':
-                python_cmd = find_working_python_cmd()
-                cmd = python_cmd + ['-m', 'unrpyc', rpyc_path]
-                cwd = None
-            elif unrpyc_path.endswith('.py'):
-                # ВАЖНО: используем системный Python, не sys.executable!
-                python_cmd = find_working_python_cmd()
-                if not python_cmd:
-                    write_discovery_log("[RPYC] No system python for unrpyc")
-                    return False
-                cmd = python_cmd + [unrpyc_path, rpyc_path]
-                # unrpyc требует запуск из своей директории (там лежит modules/)
-                cwd = os.path.dirname(unrpyc_path)
-            else:
-                cmd = [unrpyc_path, rpyc_path]
-                cwd = None
+            result = run_command(cmd, timeout=600)
             
-            write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
-                os.path.basename(rpyc_path), os.path.basename(rpy_path)))
-            
-            result = run_command(cmd, timeout=60, cwd=cwd)
-            
-            if result.returncode == 0:
-                if os.path.exists(rpy_path):
-                    write_discovery_log("[RPYC] Successfully decompiled: {}".format(os.path.basename(rpy_path)))
-                    return True
-                else:
-                    write_discovery_log("[RPYC] unrpyc completed but .rpy not created")
-                    return False
-            else:
-                write_discovery_log("[RPYC] unrpyc failed (code {}): {}".format(
-                    result.returncode, (result.stderr or result.stdout)[:300]))
-                return False
-        
-        except subprocess.TimeoutExpired:
-            write_discovery_log("[RPYC] Decompilation timeout: {}".format(os.path.basename(rpyc_path)))
-            return False
-        except Exception as e:
-            write_discovery_log("[RPYC] Error: {}".format(e))
-            return False
-    # =========================================================================
-    # RPA ARCHIVE EXTRACTION (with external decompilation)
-    # =========================================================================
-    def extract_rpa_scripts_only():
-        """Извлекает скрипты из .rpa архивов используя CLI-утилиту unrpa."""
-        extracted_count = 0
-        skipped_count = 0
-        decompiled_count = 0
-        
-        unrpa_path, unrpyc_path = ensure_tools_installed()
-        
-        if not unrpa_path:
-            write_discovery_log("[RPA] Cannot extract .rpa archives without unrpa")
-            return 0
-        
-        if not unrpyc_path:
-            write_discovery_log("[INIT] unrpyc not available - .rpyc files will not be decompiled")
-                
-        # Проходим по всем .rpa архивам
-        for root, dirs, files in os.walk(config.gamedir):
-            if 'tl' in root or 'cache' in root:
-                continue
-            
-            for file in files:
-                if not file.endswith('.rpa'):
-                    continue
-                    
-                rpa_path = os.path.join(root, file)
-                write_discovery_log("[RPA] Processing archive: {}".format(file))
-                
-                # ============================================================
-                # ШАГ 1: Получаем список файлов через unrpa -l (list)
-                # ============================================================
-                file_list_output = None
-                
-                try:
-                    cmd = build_unrpa_cmd(unrpa_path, ['-l', rpa_path])
-                    
-                    result = run_command(cmd, timeout=30)
-                    
-                    if result.returncode == 0:
-                        file_list_output = result.stdout
-                    else:
-                        write_discovery_log("[RPA] unrpa -l failed (code {}): {}".format(result.returncode, result.stderr[:200]))
-                        # Fallback на --list
-                        cmd = build_unrpa_cmd(unrpa_path, ['--list', rpa_path])
-                        result = run_command(cmd, timeout=30)
-                        if result.returncode == 0:
-                            file_list_output = result.stdout
-                        else:
-                            continue
-                
-                except Exception as e:
-                    write_discovery_log("[RPA] Error running unrpa list: {}".format(e))
-                    continue
-                
-                # ============================================================
-                # ШАГ 2: Проверяем наличие .rpy/.rpyc файлов
-                # ============================================================
-                script_files = []
-                
-                if file_list_output:
-                    for line in file_list_output.strip().split('\n'):
-                        line = line.strip()
-                        if not line: 
-                            continue
+            if result.stdout:
+                for line in result.stdout.split('\n')[-10:]:
+                    if line.strip():
+                        write_discovery_log("[EXTRACTOR] " + line)
                         
-                        # В выводе может быть просто путь или путь с доп. инфо
-                        if line.endswith('.rpy') or line.endswith('.rpyc'):
-                            script_files.append(line)
-                        elif ' ' in line:
-                            parts = line.split()
-                            if parts[-1].endswith('.rpy') or parts[-1].endswith('.rpyc'):
-                                script_files.append(parts[-1])
-                
-                if not script_files:
-                    write_discovery_log("[RPA] No .rpy/.rpyc files in {}, skipping".format(file))
-                    continue
-                
-                write_discovery_log("[RPA] Found {} script files in {}".format(len(script_files), file))
-                
-                # ============================================================
-                # ШАГ 3: Распаковываем архив во временную директорию
-                # ============================================================
-                temp_extract_dir = os.path.join(config.gamedir, '_temp_rpa_extract_' + file.replace('.rpa', ''))
-                
-                try:
-                    if os.path.exists(temp_extract_dir):
-                        import shutil
-                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    makedirs_compat(temp_extract_dir, exist_ok=True)
-                    
-                    write_discovery_log("[RPA] Extracting {} to temporary directory...".format(file))
-                    
-                    # unrpa извлекает весь архив, поэтому используем временную папку
-                    cmd = build_unrpa_cmd(unrpa_path, ['-mp', temp_extract_dir, rpa_path])
-                    
-                    result = run_command(cmd, timeout=120)
-                    
-                    if result.returncode != 0:
-                        write_discovery_log("[RPA] unrpa extraction failed: {}".format(result.stderr[:200]))
-                        import shutil
-                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                        continue
-                    
-                    write_discovery_log("[RPA] Extraction completed, filtering scripts...")
-                    
-                    # ============================================================
-                    # ШАГ 4: Копируем только НОВЫЕ файлы + декомпилируем новые .rpyc
-                    # Пропускаем файлы, которые уже существуют в game/
-                    # ============================================================
-                    for temp_root, temp_dirs, temp_files in os.walk(temp_extract_dir):
-                        for temp_file in temp_files:
-                            if not (temp_file.endswith('.rpy') or temp_file.endswith('.rpyc')):
-                                continue
-                            
-                            temp_path = os.path.join(temp_root, temp_file)
-                            rel_path = os.path.relpath(temp_path, temp_extract_dir)
-                            target_path = os.path.join(config.gamedir, rel_path)
-                            
-                            # Пропускаем файлы, которые уже существуют
-                            # (однократная распаковка + декомпиляция)
-                            if os.path.exists(target_path):
-                                skipped_count += 1
-                                write_discovery_log("[RPA] Skipped (already exists): {}".format(rel_path))
-                                continue
-                            
-                            # Создаём директории
-                            target_dir = os.path.dirname(target_path)
-                            if target_dir:
-                                makedirs_compat(target_dir, exist_ok=True)
-                            
-                            # Копируем файл
-                            try:
-                                with open(temp_path, 'rb') as src:
-                                    with open(target_path, 'wb') as dst:
-                                        dst.write(src.read())
-                                
-                                size = os.path.getsize(target_path)
-                                write_discovery_log("[RPA] Extracted: {} ({} bytes)".format(rel_path, size))
-                                extracted_count += 1
-                                
-                                # Декомпилируем только свежеизвлечённые .rpyc
-                                if temp_file.endswith('.rpyc') and DECOMPILE_RPYC and unrpyc_path:
-                                    if decompile_rpyc_external(target_path, unrpyc_path):
-                                        decompiled_count += 1
-                            except Exception as e:
-                                write_discovery_log("[RPA] Error copying {}: {}".format(rel_path, e))
-                    
-                    # Удаляем временную директорию
-                    import shutil
-                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                    write_discovery_log("[RPA] Archive {} processed".format(file))
-                
-                except Exception as e:
-                    write_discovery_log("[RPA] Error processing {}: {}".format(file, e))
-                    import shutil
-                    if os.path.exists(temp_extract_dir):
-                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
+            if result.stderr:
+                for line in result.stderr.split('\n')[-10:]:
+                    if line.strip():
+                        write_discovery_log("[EXTRACTOR STDERR] " + line)
+                        
+            if result.returncode == 0:
+                write_discovery_log("[INIT] Resource extractor finished successfully.")
+                return True
+            else:
+                write_discovery_log("[INIT] Resource extractor failed with code {}.".format(result.returncode))
+        except Exception as e:
+            write_discovery_log("[INIT] Error running resource extractor: {}".format(e))
+
+        # Выводим инструкцию по ручному запуску в случае ошибки
+        write_discovery_log("[INIT] " + "="*60)
+        write_discovery_log("[INIT] ERROR: Resource extractor failed to run automatically.")
+        write_discovery_log("[INIT] ")
+        write_discovery_log("[INIT] MANUAL EXECUTION REQUIRED:")
+        write_discovery_log("[INIT] 1. Open Command Prompt (cmd) or Terminal.")
+        write_discovery_log("[INIT] 2. Run the following command:")
+        write_discovery_log("[INIT] ")
+        write_discovery_log("[INIT]    {}".format(' '.join(cmd)))
+        write_discovery_log("[INIT] ")
+        write_discovery_log("[INIT] " + "="*60)
         
-        write_discovery_log("[RPA] Total: extracted {} scripts, skipped {}, decompiled {}".format(
-            extracted_count, skipped_count, decompiled_count))
-        
-        return extracted_count
+        return False
 
     # =========================================================================
     # AUTO-DISCOVERY FUNCTIONS
@@ -1091,8 +538,7 @@ init python:
         write_discovery_log("\n[SCREEN DISCOVERY] Scanning for screens with imagebutton...")
         
         def unescape_text(text):
-            if text is None:
-                return None
+            if text is None: return None
             text = text.replace('\\"', '"').replace("\\'", "'")
             text = text.replace('\\n', '\n').replace('\\t', '\t')
             return text
@@ -1191,17 +637,13 @@ init python:
     if not MENU_VARIABLE_NAMES:
         write_discovery_log("\n[INIT] No config found or empty. Starting full auto-discovery...")
         
-        # Проверяем количество .rpy файлов
         test_files = get_all_rpy_files()
         
-        # Если мало файлов, извлекаем из архивов
-        if len(test_files) < 10:
-            write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction...".format(len(test_files)))
-            extracted = extract_rpa_scripts_only()
-            if extracted > 0:
-                write_discovery_log("[INIT] Extracted {} script files from .rpa archives".format(extracted))
+        # Если мало файлов, запускаем внешний скрипт распаковки
+        if len(test_files) < 2000:
+            write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction via external script...".format(len(test_files)))
+            run_resource_extractor()
         
-        # Сканируем все файлы (включая только что распакованные)
         all_files = get_all_rpy_files()
         write_discovery_log("[INIT] Found {} .rpy files to scan.".format(len(all_files)))
         
@@ -1327,6 +769,7 @@ init python:
                 current_blocks[current_choice].append(line)
         _menu_parse_cache[cache_key] = current_blocks
         return current_blocks
+        
     def core_menu_parser(caption_clean):
         filename, _ = renpy.get_filename_line()
         if not filename: return caption_clean
