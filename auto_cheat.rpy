@@ -247,18 +247,31 @@ init python:
             write_discovery_log("[INIT] Please place auto_cheat_resource_extractor.py in the game directory.")
             return False
 
-        python_cmd = find_working_python_cmd()
-        if not python_cmd:
-            write_discovery_log("[INIT] ERROR: No Python 3 found to run resource extractor.")
-            write_discovery_log("[INIT] Please install Python 3 and add его в PATH.")
-            return False
-
-        cmd = python_cmd + [
-            extractor_script,
+        # Формируем аргументы заранее — они нужны и для автозапуска, и для инструкции по ручному запуску
+        extractor_args = [
             "--gamedir", config.gamedir,
             "--basedir", os.path.dirname(config.gamedir),
             "--log-file", DISCOVERY_LOG_PATH
         ]
+
+        python_cmd = find_working_python_cmd()
+        if not python_cmd:
+            write_discovery_log("[INIT] ERROR: No Python 3 found to run resource extractor.")
+            write_discovery_log("[INIT] Please install Python 3.9+ and add it to PATH.")
+            write_discovery_log("[INIT] ")
+            write_discovery_log("[INIT] " + "="*60)
+            write_discovery_log("[INIT] MANUAL EXECUTION REQUIRED:")
+            write_discovery_log("[INIT] 1. Open Command Prompt (cmd) or Terminal.")
+            write_discovery_log("[INIT] 2. Run the following command:")
+            write_discovery_log("[INIT] ")
+            write_discovery_log("[INIT]    python3 \"{}\" {}".format(
+                extractor_script, ' '.join('"{}"'.format(a) if ' ' in a else a for a in extractor_args)))
+            write_discovery_log("[INIT] ")
+            write_discovery_log("[INIT]    (or use 'py -3' / 'python' depending on your system)")
+            write_discovery_log("[INIT] " + "="*60)
+            return False
+
+        cmd = python_cmd + [extractor_script] + extractor_args
         
         write_discovery_log("[INIT] Running resource extractor: {}".format(' '.join(cmd)))
         
@@ -283,7 +296,7 @@ init python:
         except Exception as e:
             write_discovery_log("[INIT] Error running resource extractor: {}".format(e))
 
-        # Выводим инструкцию по ручному запуску в случае ошибки
+        # Выводим инструкцию по ручному запуску при любой ошибке
         write_discovery_log("[INIT] " + "="*60)
         write_discovery_log("[INIT] ERROR: Resource extractor failed to run automatically.")
         write_discovery_log("[INIT] ")
@@ -291,7 +304,8 @@ init python:
         write_discovery_log("[INIT] 1. Open Command Prompt (cmd) or Terminal.")
         write_discovery_log("[INIT] 2. Run the following command:")
         write_discovery_log("[INIT] ")
-        write_discovery_log("[INIT]    {}".format(' '.join(cmd)))
+        write_discovery_log("[INIT]    {}".format(' '.join(
+            '"{}"'.format(part) if ' ' in part else part for part in cmd)))
         write_discovery_log("[INIT] ")
         write_discovery_log("[INIT] " + "="*60)
         
