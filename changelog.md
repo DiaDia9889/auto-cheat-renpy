@@ -1,5 +1,29 @@
 # Changelog
 
+## [8.0.0] — 2026-07-20
+### Added
+- **`auto_cheat_resource_extractor.py`:** Standalone Python 3.9+ script for RPA archive extraction and RPYC decompilation. Extracted from `auto_cheat.rpy` to reduce complexity and avoid Python 2.7 runtime limitations.
+- **Python version check:** Extractor script now validates `sys.version_info >= (3, 9)` at startup and exits with a clear error message if the requirement is not met.
+- **Console log duplication:** `write_discovery_log()` in the extractor now mirrors all log entries to `stdout` via `print()`, enabling real-time progress monitoring during manual execution.
+- **RPY decompilation skip:** Before decompiling a `.rpyc` file, the extractor now checks if a corresponding `.rpy` file already exists alongside it. If found, decompilation is skipped with a log message (`[RPYC] .rpy file already exists...`), preventing unnecessary work and protecting user-modified source files from being overwritten.
+- **Manual execution instructions:** If the extractor fails to launch automatically, `auto_cheat.rpy` now writes the exact CLI command to the discovery log for manual execution.
+
+
+### Changed
+- **Architecture split:** All `unrpa`/`unrpyc` discovery, pip installation, GitHub download, RPA extraction, and RPYC decompilation logic moved from `auto_cheat.rpy` into `auto_cheat_resource_extractor.py`. The main script now only orchestrates the extractor via subprocess.
+- **Standard `subprocess.run`:** Extractor script replaces the custom `run_command()` abstraction with native `subprocess.run(capture_output=True, text=True, timeout=...)` (Python 3.5+), simplifying the codebase.
+- **Simplified Python discovery:** `find_working_python_cmd()` in the extractor now always returns `[sys.executable]` since the script is guaranteed to run under Python 3.9+. No more PATH/glob-based interpreter scanning.
+- **Modern `os.makedirs`:** Replaced `makedirs_compat()` wrapper with native `os.makedirs(path, exist_ok=True)` throughout the extractor.
+- **Path normalization:** `--gamedir`, `--basedir`, and `--log-file` arguments are now resolved via `os.path.abspath()` to prevent false negatives in `os.path.exists()` checks.
+
+### Fixed
+- **Repeated `unrpyc` cloning:** `find_unrpyc()` now searches system/venv installations after local paths and normalizes base directory paths, preventing redundant GitHub downloads on subsequent runs.
+- **Repeated `unrpa` pip installation:** `find_unrpa()` now falls back to `find_installed_unrpa()` (which checks both PATH and `python -m unrpa`), so previously pip-installed packages are correctly detected and not reinstalled.
+
+### Removed
+- **Legacy Python 2.7 compatibility from extractor:** Deleted `SubprocessResult` class, `run_command()` wrapper, `makedirs_compat()`, `threading.Timer`-based process kill logic, and manual byte-to-string decoding. The extractor is now Python 3.9+ only.
+- **Unused imports:** Removed `threading`, `glob`, `re`, `json`, `struct`, `pickle`, and `zlib` from the extractor script.
+
 ## [7.0.1] — 2026-07-19
 ### Added
 - **`run_command()` + `CommandResult`:** Python 2.7 compatible replacement for `subprocess.run()` (which doesn't exist in Ren'Py's runtime). All subprocess calls now use this abstraction.

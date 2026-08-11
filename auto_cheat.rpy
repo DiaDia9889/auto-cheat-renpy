@@ -640,7 +640,7 @@ init python:
         test_files = get_all_rpy_files()
         
         # Если мало файлов, запускаем внешний скрипт распаковки
-        if len(test_files) < 2000:
+        if len(test_files) < 1000:
             write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction via external script...".format(len(test_files)))
             run_resource_extractor()
         

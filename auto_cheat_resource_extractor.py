@@ -3,18 +3,20 @@
 """
 auto_cheat_resource_extractor.py
 Внешний скрипт для распаковки .rpa архивов и декомпиляции .rpyc файлов.
-Запускается из auto_cheat.rpy в среде Python 3.
+Запускается из auto_cheat.rpy в среде Python 3.9+.
 """
 
 import sys
+
+# Проверка версии Python
+if sys.version_info < (3, 9):
+    print("ERROR: This script requires Python 3.9 or higher.")
+    sys.exit(1)
+
 import os
 import argparse
 import subprocess
-import threading
 import shutil
-import glob
-import re
-import json
 import urllib.request
 import zipfile
 import io
@@ -50,145 +52,62 @@ def write_discovery_log(message):
     except Exception as e:
         print("LOG ERROR:", e)
 
-def makedirs_compat(path, exist_ok=False):
-    try:
-        os.makedirs(path)
-    except OSError:
-        if not exist_ok or not os.path.isdir(path):
-            raise
-
-class SubprocessResult:
-    def __init__(self, returncode, stdout, stderr):
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-
-def run_command(cmd, timeout=None, cwd=None):
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd
-        )
-        
-        timer = None
-        if timeout is not None:
-            def kill_proc():
-                if proc.poll() is None:
-                    try:
-                        proc.kill()
-                    except:
-                        pass
-            timer = threading.Timer(timeout, kill_proc)
-            timer.start()
-            
-        try:
-            stdout, stderr = proc.communicate()
-        finally:
-            if timer is not None:
-                timer.cancel()
-                
-        encoding = 'utf-8'
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode(encoding, errors='replace')
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode(encoding, errors='replace')
-            
-        return SubprocessResult(proc.returncode, stdout, stderr)
-        
-    except Exception as e:
-        return SubprocessResult(-1, "", str(e))
+def find_working_python_cmd():
+    """Возвращает команду для запуска Python 3."""
+    return [sys.executable]
 
 # =========================================================================
 # PYTHON & PIP UTILS
 # =========================================================================
-def find_working_python_cmd():
-    cache_attr = '_working_python_cmd'
-    if hasattr(find_working_python_cmd, cache_attr):
-        return getattr(find_working_python_cmd, cache_attr)
-        
-    if sys.version_info[0] >= 3:
-        setattr(find_working_python_cmd, cache_attr, [sys.executable])
-        return [sys.executable]
-
-    candidates = [
-        ['py', '-3'], ['python3'], ['python']
-    ] if sys.platform == 'win32' else [['python3'], ['python']]
-    
-    if sys.platform == 'win32':
-        common_patterns = [
-            r'C:\Python3*\python.exe',
-            r'C:\Users\*\AppData\Local\Programs\Python\Python3*\python.exe',
-            r'C:\Program Files\Python3*\python.exe',
-        ]
-        for pattern in common_patterns:
-            matches = glob.glob(pattern)
-            for match in matches:
-                candidates.insert(0, [match])
-    
-    for candidate in candidates:
-        try:
-            proc = subprocess.Popen(
-                candidate + ['--version'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            try:
-                stdout, stderr = proc.communicate(timeout=10)
-            except TypeError:
-                stdout, stderr = proc.communicate()
-            
-            version_output = (stdout.decode('utf-8', errors='ignore').strip() or 
-                            stderr.decode('utf-8', errors='ignore').strip())
-            
-            if proc.returncode == 0 and 'Python 3.' in version_output:
-                setattr(find_working_python_cmd, cache_attr, candidate)
-                return candidate
-        except Exception:
-            continue
-    
-    setattr(find_working_python_cmd, cache_attr, None)
-    return None
-
 def check_pip_available():
     python_cmd = find_working_python_cmd()
-    if not python_cmd: return False
     try:
-        result = run_command(python_cmd + ['-m', 'pip', '--version'], timeout=15)
+        result = subprocess.run(
+            python_cmd + ['-m', 'pip', '--version'],
+            capture_output=True, text=True, timeout=15
+        )
         return result.returncode == 0
-    except:
+    except Exception:
         return False
 
 def install_packages_via_pip(packages):
     if not packages: return True
     python_cmd = find_working_python_cmd()
-    if not python_cmd: return False
     try:
         cmd = python_cmd + ['-m', 'pip', 'install', '--upgrade', '--no-warn-script-location'] + packages
         write_discovery_log("[PIP] Installing: {}".format(' '.join(cmd)))
-        result = run_command(cmd, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             write_discovery_log("[PIP] Error: {}".format(result.stderr))
         return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        write_discovery_log("[PIP] Installation timeout")
+        return False
     except Exception as e:
         write_discovery_log("[PIP] Exception: {}".format(e))
         return False
 
 def find_installed_package(package_name):
     try:
-        result = run_command([package_name, '--help'], timeout=15)
+        result = subprocess.run(
+            [package_name, '--help'],
+            capture_output=True, text=True, timeout=15
+        )
         if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
             return package_name
-    except: pass
+    except Exception:
+        pass
     
     python_cmd = find_working_python_cmd()
-    if python_cmd:
-        try:
-            result = run_command(python_cmd + ['-m', package_name, '--help'], timeout=15)
-            if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
-                return '__python_module__'
-        except: pass
+    try:
+        result = subprocess.run(
+            python_cmd + ['-m', package_name, '--help'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 or 'usage' in (result.stdout + result.stderr).lower():
+            return '__python_module__'
+    except Exception:
+        pass
     return None
 
 def find_installed_unrpa(): return find_installed_package('unrpa')
@@ -330,9 +249,6 @@ def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
             cwd = None
         elif unrpyc_path.endswith('.py'):
             python_cmd = find_working_python_cmd()
-            if not python_cmd:
-                write_discovery_log("[RPYC] No system python for unrpyc")
-                return False
             cmd = python_cmd + [unrpyc_path, rpyc_path]
             cwd = os.path.dirname(unrpyc_path)
         else:
@@ -342,7 +258,7 @@ def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
         write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
             os.path.basename(rpyc_path), os.path.basename(rpy_path)))
             
-        result = run_command(cmd, timeout=60, cwd=cwd)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=cwd)
         if result.returncode == 0:
             if os.path.exists(rpy_path):
                 write_discovery_log("[RPYC] Successfully decompiled: {}".format(os.path.basename(rpy_path)))
@@ -380,17 +296,20 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
             file_list_output = None
             try:
                 cmd = build_unrpa_cmd(unrpa_path, ['-l', rpa_path])
-                result = run_command(cmd, timeout=30)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
                     file_list_output = result.stdout
                 else:
                     write_discovery_log("[RPA] unrpa -l failed (code {}): {}".format(result.returncode, result.stderr[:200]))
                     cmd = build_unrpa_cmd(unrpa_path, ['--list', rpa_path])
-                    result = run_command(cmd, timeout=30)
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0:
                         file_list_output = result.stdout
                     else:
                         continue
+            except subprocess.TimeoutExpired:
+                write_discovery_log("[RPA] unrpa list timeout")
+                continue
             except Exception as e:
                 write_discovery_log("[RPA] Error running unrpa list: {}".format(e))
                 continue
@@ -417,12 +336,12 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
             try:
                 if os.path.exists(temp_extract_dir):
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                makedirs_compat(temp_extract_dir, exist_ok=True)
+                os.makedirs(temp_extract_dir, exist_ok=True)
                 
                 write_discovery_log("[RPA] Extracting {} to temporary directory...".format(file))
                 
                 cmd = build_unrpa_cmd(unrpa_path, ['-mp', temp_extract_dir, rpa_path])
-                result = run_command(cmd, timeout=120)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 
                 if result.returncode != 0:
                     write_discovery_log("[RPA] unrpa extraction failed: {}".format(result.stderr[:200]))
@@ -445,7 +364,7 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                             continue
                         
                         target_dir = os.path.dirname(target_path)
-                        if target_dir: makedirs_compat(target_dir, exist_ok=True)
+                        if target_dir: os.makedirs(target_dir, exist_ok=True)
                         
                         try:
                             with open(temp_path, 'rb') as src:
