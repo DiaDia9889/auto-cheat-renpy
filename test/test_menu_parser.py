@@ -312,3 +312,218 @@ class TestMinusAssignment:
         result = cheat['core_menu_parser']('Insult')
         # Проверяем формат: -10 (без пробела между - и 10, но с пробелом перед -)
         assert '-10' in result or '-=10' in result
+
+class TestDuplicateMenuChoices:
+    """Одинаковые названия пунктов в разных menu: блоках.
+    
+    Покрывает баг: когда в нескольких menu: есть одинаковые пункты
+    ("Налево", "Прямо", "Направо"), подсказки брались из первого menu:,
+    а не из текущего.
+    """
+
+    def test_same_choice_names_different_menus(self, setup_test_env):
+        """Одинаковые пункты в разных menu: дают разные подсказки."""
+        cheat, tmp_path = setup_test_env
+        
+        content = '''label test:
+    scene 6ch_rallycross03 with dissolve
+    dar "Восток. А стрелка почему-то на запад. А нам куда?"
+    menu:
+        dar "Восток. А стрелка почему-то на запад. А нам куда?"
+
+        "Налево":
+            $ rally_cross_quant += 0
+
+        "Прямо":
+            $ rally_cross_quant += 0
+
+        "Направо":
+            $ rally_cross_quant += 1
+
+    scene 6ch_rallycross04 with dissolve
+    dar "Ого. Гляди-ка, [plr_nm] - Простоквашино. Заедем в гости к Дяде Федору?"
+    menu:
+        dar "Ого. Гляди-ка, [plr_nm] - Простоквашино. Заедем в гости к Дяде Федору?"
+
+        "Налево":
+            $ rally_cross_quant += 0
+
+        "Прямо":
+            $ rally_cross_quant += 1
+
+        "Направо":
+            $ rally_cross_quant += 0
+'''
+        write_test_rpy(tmp_path, content)
+        
+        # Добавляем переменную в известные
+        cheat['MENU_VARIABLE_NAMES']['rally_cross_quant'] = 'rally_cross_quant'
+        
+        # Определяем строки, где находятся menu: (1-based для Ren'Py)
+        lines = content.splitlines()
+        menu_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith('menu') and ':' in line:
+                menu_lines.append(i + 1)
+        
+        assert len(menu_lines) == 2, "Expected 2 menu: blocks"
+        
+        # ============================================================
+        # Тестируем ПЕРВЫЙ menu: (line_number указывает на него)
+        # ============================================================
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[0])
+        
+        # "Направо" в первом menu даёт += 1
+        result = cheat['core_menu_parser']('Направо')
+        assert 'rally_cross_quant' in result, f"Expected variable in result: {result}"
+        assert '+=1' in result, f"Expected +=1 for 'Направо' in first menu: {result}"
+        assert '+=0' not in result, f"Should not have +=0 for 'Направо' in first menu: {result}"
+        
+        # "Налево" в первом menu даёт += 0
+        result = cheat['core_menu_parser']('Налево')
+        assert 'rally_cross_quant' in result
+        assert '+=0' in result, f"Expected +=0 for 'Налево' in first menu: {result}"
+        
+        # "Прямо" в первом menu даёт += 0
+        result = cheat['core_menu_parser']('Прямо')
+        assert 'rally_cross_quant' in result
+        assert '+=0' in result, f"Expected +=0 for 'Прямо' in first menu: {result}"
+        
+        # ============================================================
+        # Тестируем ВТОРОЙ menu: (line_number указывает на него)
+        # ============================================================
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[1])
+        
+        # "Прямо" во втором menu даёт += 1 (в первом давало += 0!)
+        result = cheat['core_menu_parser']('Прямо')
+        assert 'rally_cross_quant' in result
+        assert '+=1' in result, f"Expected +=1 for 'Прямо' in second menu: {result}"
+        assert '+=0' not in result, f"Should not have +=0 for 'Прямо' in second menu: {result}"
+        
+        # "Направо" во втором menu даёт += 0 (в первом давало += 1!)
+        result = cheat['core_menu_parser']('Направо')
+        assert 'rally_cross_quant' in result
+        assert '+=0' in result, f"Expected +=0 for 'Направо' in second menu: {result}"
+        assert '+=1' not in result, f"Should not have +=1 for 'Направо' in second menu: {result}"
+        
+        # "Налево" во втором menu даёт += 0 (как и в первом)
+        result = cheat['core_menu_parser']('Налево')
+        assert 'rally_cross_quant' in result
+        assert '+=0' in result
+
+    def test_same_choice_names_line_inside_menu_block(self, setup_test_env):
+        """line_number указывает на строку внутри menu: блока (не на сам menu:)."""
+        cheat, tmp_path = setup_test_env
+        
+        content = '''label test:
+    menu:
+        dar "Подсказка перед выбором"
+
+        "Налево":
+            $ var1 += 1
+
+        "Направо":
+            $ var2 += 1
+
+    menu:
+        dar "Другая подсказка"
+
+        "Налево":
+            $ var1 += 100
+
+        "Направо":
+            $ var2 += 100
+'''
+        write_test_rpy(tmp_path, content)
+        
+        # Находим строки menu: (1-based)
+        lines = content.splitlines()
+        menu_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith('menu') and ':' in line:
+                menu_lines.append(i + 1)
+        
+        # line_number указывает на строку ПОСЛЕ первого menu: (например, dar "...")
+        # Это строка menu_lines[0] + 1
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[0] + 1)
+        
+        result = cheat['core_menu_parser']('Налево')
+        assert 'var1' in result
+        assert '+=1' in result
+        assert '+=100' not in result
+        
+        # line_number указывает на строку ПОСЛЕ второго menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[1] + 1)
+        
+        result = cheat['core_menu_parser']('Налево')
+        assert 'var1' in result
+        assert '+=100' in result
+        assert '+=1' not in result or '+=100' in result  # +=1 может входить в +=100 как подстрока
+
+    def test_fallback_when_line_number_is_zero(self, setup_test_env):
+        """Если line_number = 0, используется fallback на поиск по тексту."""
+        cheat, tmp_path = setup_test_env
+        
+        content = '''label test:
+    menu:
+        "Налево":
+            $ var1 += 1
+
+    menu:
+        "Налево":
+            $ var2 += 10
+'''
+        write_test_rpy(tmp_path, content)
+        
+        # line_number = 0 — fallback на поиск по тексту (берётся первый menu:)
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', 0)
+        
+        result = cheat['core_menu_parser']('Налево')
+        # При fallback берётся первый menu:, так что var1 += 1
+        assert 'var1' in result
+        assert '+=1' in result
+        assert '+=10' not in result
+
+    def test_three_menus_same_choices(self, setup_test_env):
+        """Три menu: с одинаковыми пунктами — каждый даёт свои подсказки."""
+        cheat, tmp_path = setup_test_env
+        
+        content = '''label test:
+    menu:
+        "Go":
+            $ score += 1
+
+    menu:
+        "Go":
+            $ score += 10
+
+    menu:
+        "Go":
+            $ score += 100
+'''
+        write_test_rpy(tmp_path, content)
+        
+        lines = content.splitlines()
+        menu_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith('menu') and ':' in line:
+                menu_lines.append(i + 1)
+        
+        assert len(menu_lines) == 3
+        
+        # Первый menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[0])
+        result = cheat['core_menu_parser']('Go')
+        assert '+=1' in result
+        assert '+=10' not in result
+        assert '+=100' not in result
+        
+        # Второй menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[1])
+        result = cheat['core_menu_parser']('Go')
+        assert '+=10' in result
+        
+        # Третий menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[2])
+        result = cheat['core_menu_parser']('Go')
+        assert '+=100' in result

@@ -654,7 +654,7 @@ init python:
         test_files = get_all_rpy_files()
         
         # Если мало файлов, запускаем внешний скрипт распаковки
-        if len(test_files) < 1000:
+        if len(test_files) < 10:
             write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction via external script...".format(len(test_files)))
             run_resource_extractor()
         
@@ -785,7 +785,7 @@ init python:
         return current_blocks
         
     def core_menu_parser(caption_clean):
-        filename, _ = renpy.get_filename_line()
+        filename, line_number = renpy.get_filename_line()
         if not filename: return caption_clean
         if filename.startswith("game/"): filename = filename[5:]
         elif filename.startswith("game\\"): filename = filename[5:]
@@ -798,35 +798,69 @@ init python:
                 return caption_clean
 
             lookup_caption = normalize_text(caption_clean)
-            write_cheat_log("DEBUG: Looking for caption: '{}'".format(lookup_caption))
+            write_cheat_log("DEBUG: Looking for caption: '{}' at line {}".format(lookup_caption, line_number))
             
             menu_locations = [i for i, line in enumerate(lines) if not line.strip().startswith(('old', 'new')) and line.strip().split('#')[0].strip().startswith('menu') and ':' in line]
             if not menu_locations: 
                 write_cheat_log("DEBUG: No menu: found in file")
                 return caption_clean
 
-            target_menu_idx, menu_blocks, original_key = -1, {}, None
+            # ============================================================
+            # ОПРЕДЕЛЯЕМ ЦЕЛЕВОЙ menu: БЛОК ПО НОМЕРУ СТРОКИ
+            # ============================================================
+            target_menu_idx = -1
             
-            for menu_idx in menu_locations:
-                current_blocks = get_parsed_menu(filepath, menu_idx, lines)
-                for ct in current_blocks.keys():
-                    ct_normalized = normalize_text(ct)
-                    write_cheat_log("DEBUG: Comparing '{}' with '{}'".format(lookup_caption, ct_normalized))
-                    if lookup_caption == ct_normalized or lookup_caption in ct_normalized or ct_normalized in lookup_caption:
+            if line_number and line_number > 0:
+                # line_number из Ren'Py - 1-based, menu_locations - 0-based
+                current_line_0based = line_number - 1
+                # Берём последний menu:, который находится ДО или НА текущей строке
+                for menu_idx in menu_locations:
+                    if menu_idx <= current_line_0based:
                         target_menu_idx = menu_idx
-                        menu_blocks = current_blocks
-                        original_key = ct
-                        write_cheat_log("DEBUG: Found menu at line {} with {} variants".format(menu_idx, len(current_blocks)))
+                    else:
                         break
-                if target_menu_idx != -1:
-                    break
-                    
-            if target_menu_idx == -1: 
-                write_cheat_log("DEBUG: Caption '{}' not found in any menu".format(lookup_caption))
+                write_cheat_log("DEBUG: Line {} -> using menu at line {}".format(line_number, target_menu_idx))
+            
+            # Fallback: если не удалось определить по строке, ищем по тексту (старая логика)
+            if target_menu_idx == -1:
+                write_cheat_log("DEBUG: Could not determine menu by line number, falling back to text search")
+                for menu_idx in menu_locations:
+                    current_blocks = get_parsed_menu(filepath, menu_idx, lines)
+                    for ct in current_blocks.keys():
+                        ct_normalized = normalize_text(ct)
+                        if lookup_caption == ct_normalized or lookup_caption in ct_normalized or ct_normalized in lookup_caption:
+                            target_menu_idx = menu_idx
+                            break
+                    if target_menu_idx != -1:
+                        break
+            
+            if target_menu_idx == -1:
+                write_cheat_log("DEBUG: Could not determine target menu")
                 return caption_clean
 
+            # ============================================================
+            # ПАРСИМ ТОЛЬКО ЦЕЛЕВОЙ menu: БЛОК
+            # ============================================================
+            menu_blocks = get_parsed_menu(filepath, target_menu_idx, lines)
+            write_cheat_log("DEBUG: Using menu at line {} with {} variants".format(target_menu_idx, len(menu_blocks)))
+            
+            # Ищем вариант ТОЛЬКО в целевом menu:
+            original_key = None
+            for ct in menu_blocks.keys():
+                ct_normalized = normalize_text(ct)
+                if lookup_caption == ct_normalized or lookup_caption in ct_normalized or ct_normalized in lookup_caption:
+                    original_key = ct
+                    break
+            
+            if original_key is None:
+                write_cheat_log("DEBUG: Caption '{}' not found in menu at line {}".format(lookup_caption, target_menu_idx))
+                return caption_clean
+
+            # ============================================================
+            # ПАРСИМ ИЗМЕНЕНИЯ ПЕРЕМЕННЫХ
+            # ============================================================
             var_changes = {}
-            if original_key and original_key in menu_blocks:
+            if original_key in menu_blocks:
                 write_cheat_log("DEBUG: Processing {} code lines for '{}'".format(len(menu_blocks[original_key]), original_key))
                 for code_line in menu_blocks[original_key]:
                     stripped_line = code_line.strip()
