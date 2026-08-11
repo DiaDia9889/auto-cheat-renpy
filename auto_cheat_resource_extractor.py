@@ -312,6 +312,7 @@ def build_unrpa_cmd(unrpa_path, extra_args):
     else: return [unrpa_path] + extra_args
 
 def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
+    """Декомпилирует .rpyc файл используя unrpyc."""
     if not unrpyc_path: return False
     rpy_path = rpyc_path[:-1]
     
@@ -324,22 +325,43 @@ def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
             cwd = None
         elif unrpyc_path.endswith('.py'):
             python_cmd = find_working_python_cmd()
-            if not python_cmd: return False
+            if not python_cmd:
+                write_discovery_log("[RPYC] No system python for unrpyc")
+                return False
             cmd = python_cmd + [unrpyc_path, rpyc_path]
             cwd = os.path.dirname(unrpyc_path)
         else:
             cmd = [unrpyc_path, rpyc_path]
             cwd = None
         
+        write_discovery_log("[RPYC] Decompiling: {} -> {}".format(
+            os.path.basename(rpyc_path), os.path.basename(rpy_path)))
+            
         result = run_command(cmd, timeout=60, cwd=cwd)
-        if result.returncode == 0 and os.path.exists(rpy_path):
-            return True
+        if result.returncode == 0:
+            if os.path.exists(rpy_path):
+                write_discovery_log("[RPYC] Successfully decompiled: {}".format(os.path.basename(rpy_path)))
+                return True
+            else:
+                write_discovery_log("[RPYC] unrpyc completed but .rpy not created")
+                return False
+        else:
+            write_discovery_log("[RPYC] unrpyc failed (code {}): {}".format(
+                result.returncode, (result.stderr or result.stdout)[:300]))
+            return False
+    
+    except subprocess.TimeoutExpired:
+        write_discovery_log("[RPYC] Decompilation timeout: {}".format(os.path.basename(rpyc_path)))
         return False
-    except Exception:
+    except Exception as e:
+        write_discovery_log("[RPYC] Error: {}".format(e))
         return False
 
 def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
+    """Извлекает скрипты из .rpa архивов используя CLI-утилиту unrpa."""
     extracted_count = 0
+    skipped_count = 0
+    decompiled_count = 0
     
     for root, dirs, files in os.walk(CONFIG_GAMEDIR):
         if 'tl' in root or 'cache' in root: continue
@@ -348,42 +370,61 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
             if not file.endswith('.rpa'): continue
             rpa_path = os.path.join(root, file)
             
+            write_discovery_log("[RPA] Processing archive: {}".format(file))
+            
             file_list_output = None
             try:
                 cmd = build_unrpa_cmd(unrpa_path, ['-l', rpa_path])
                 result = run_command(cmd, timeout=30)
-                if result.returncode == 0: file_list_output = result.stdout
+                if result.returncode == 0:
+                    file_list_output = result.stdout
                 else:
+                    write_discovery_log("[RPA] unrpa -l failed (code {}): {}".format(result.returncode, result.stderr[:200]))
                     cmd = build_unrpa_cmd(unrpa_path, ['--list', rpa_path])
                     result = run_command(cmd, timeout=30)
-                    if result.returncode == 0: file_list_output = result.stdout
-                    else: continue
-            except: continue
+                    if result.returncode == 0:
+                        file_list_output = result.stdout
+                    else:
+                        continue
+            except Exception as e:
+                write_discovery_log("[RPA] Error running unrpa list: {}".format(e))
+                continue
             
             script_files = []
             if file_list_output:
                 for line in file_list_output.strip().split('\n'):
                     line = line.strip()
                     if not line: continue
-                    if line.endswith('.rpy') or line.endswith('.rpyc'): script_files.append(line)
+                    if line.endswith('.rpy') or line.endswith('.rpyc'):
+                        script_files.append(line)
                     elif ' ' in line:
                         parts = line.split()
                         if parts[-1].endswith('.rpy') or parts[-1].endswith('.rpyc'):
                             script_files.append(parts[-1])
             
-            if not script_files: continue
+            if not script_files:
+                write_discovery_log("[RPA] No .rpy/.rpyc files in {}, skipping".format(file))
+                continue
+            
+            write_discovery_log("[RPA] Found {} script files in {}".format(len(script_files), file))
             
             temp_extract_dir = os.path.join(CONFIG_GAMEDIR, '_temp_rpa_extract_' + file.replace('.rpa', ''))
             try:
-                if os.path.exists(temp_extract_dir): shutil.rmtree(temp_extract_dir, ignore_errors=True)
+                if os.path.exists(temp_extract_dir):
+                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
                 makedirs_compat(temp_extract_dir, exist_ok=True)
+                
+                write_discovery_log("[RPA] Extracting {} to temporary directory...".format(file))
                 
                 cmd = build_unrpa_cmd(unrpa_path, ['-mp', temp_extract_dir, rpa_path])
                 result = run_command(cmd, timeout=120)
                 
                 if result.returncode != 0:
+                    write_discovery_log("[RPA] unrpa extraction failed: {}".format(result.stderr[:200]))
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     continue
+                
+                write_discovery_log("[RPA] Extraction completed, filtering scripts...")
                 
                 for temp_root, temp_dirs, temp_files in os.walk(temp_extract_dir):
                     for temp_file in temp_files:
@@ -393,7 +434,10 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                         rel_path = os.path.relpath(temp_path, temp_extract_dir)
                         target_path = os.path.join(CONFIG_GAMEDIR, rel_path)
                         
-                        if os.path.exists(target_path): continue
+                        if os.path.exists(target_path):
+                            skipped_count += 1
+                            write_discovery_log("[RPA] Skipped (already exists): {}".format(rel_path))
+                            continue
                         
                         target_dir = os.path.dirname(target_path)
                         if target_dir: makedirs_compat(target_dir, exist_ok=True)
@@ -403,15 +447,25 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                                 with open(target_path, 'wb') as dst:
                                     dst.write(src.read())
                             
+                            size = os.path.getsize(target_path)
+                            write_discovery_log("[RPA] Extracted: {} ({} bytes)".format(rel_path, size))
                             extracted_count += 1
+                            
                             if temp_file.endswith('.rpyc') and DECOMPILE_RPYC and unrpyc_path:
-                                decompile_rpyc_external(target_path, unrpyc_path)
-                        except: pass
+                                if decompile_rpyc_external(target_path, unrpyc_path):
+                                    decompiled_count += 1
+                        except Exception as e:
+                            write_discovery_log("[RPA] Error copying {}: {}".format(rel_path, e))
                 
                 shutil.rmtree(temp_extract_dir, ignore_errors=True)
-            except:
+                write_discovery_log("[RPA] Archive {} processed".format(file))
+            except Exception as e:
+                write_discovery_log("[RPA] Error processing {}: {}".format(file, e))
                 if os.path.exists(temp_extract_dir):
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
+    
+    write_discovery_log("[RPA] Total: extracted {} scripts, skipped {}, decompiled {}".format(
+        extracted_count, skipped_count, decompiled_count))
                     
     return extracted_count
 
