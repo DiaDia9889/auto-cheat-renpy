@@ -316,6 +316,11 @@ def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
     if not unrpyc_path: return False
     rpy_path = rpyc_path[:-1]
     
+    # Проверка: если .rpy файл уже существует, пропускаем декомпиляцию
+    if os.path.exists(rpy_path):
+        write_discovery_log("[RPYC] .rpy file already exists, skipping decompilation: {}".format(os.path.basename(rpy_path)))
+        return True
+    
     try:
         if unrpyc_path == 'unrpyc':
             cmd = ['unrpyc', rpyc_path]
@@ -451,9 +456,14 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                             write_discovery_log("[RPA] Extracted: {} ({} bytes)".format(rel_path, size))
                             extracted_count += 1
                             
+                            # Проверяем, нужна ли декомпиляция для .rpyc
                             if temp_file.endswith('.rpyc') and DECOMPILE_RPYC and unrpyc_path:
-                                if decompile_rpyc_external(target_path, unrpyc_path):
-                                    decompiled_count += 1
+                                rpy_target_path = target_path[:-1] # Путь к соседнему .rpy
+                                if os.path.exists(rpy_target_path):
+                                    write_discovery_log("[RPA] .rpy already exists for {}, skipping decompilation".format(rel_path))
+                                else:
+                                    if decompile_rpyc_external(target_path, unrpyc_path):
+                                        decompiled_count += 1
                         except Exception as e:
                             write_discovery_log("[RPA] Error copying {}: {}".format(rel_path, e))
                 
