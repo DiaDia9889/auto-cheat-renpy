@@ -1,6 +1,6 @@
 # Auto Cheat for Ren'Py - Universal Edition
 
-Version: 7.0.1 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7, 3.x
+Version: 8.0.0 | Ren'Py: 6.99, 7.x, 8.x | Python: 2.7 (runtime), 3.9+ (extractor)
 
 ---
 
@@ -12,9 +12,9 @@ Smart auto-cheat for Ren'Py visual novels that automatically analyzes game code 
 
 ## Features
 
-- **Automatic RPA archive extraction** - unpacks .rpa files when needed
+- **Automatic RPA archive extraction** - unpacks .rpa files when needed via external Python 3.9+ script
 - **Automatic tool installation** - installs unrpa and unrpyc via pip/GitHub
-- **RPYC decompilation** - decompiles .rpyc files to readable .rpy format
+- **RPYC decompilation** - decompiles .rpyc files to readable .rpy format (skips if .rpy already exists)
 - **Fully automatic setup** - finds all variables, functions, labels, and screens
 - **Menu hints** - shows variable changes in menu choices with colors
 - **Automatic imagebutton overlay** - displays hints directly on screens with choices
@@ -24,43 +24,55 @@ Smart auto-cheat for Ren'Py visual novels that automatically analyzes game code 
 - **Colored hints** - green for +=, red for -=, blue for =
 - **High performance** with file and parsing result caching
 - **Flexible JSON configuration**
-- **Detailed logs** for debugging (auto_cheat.log + auto_cheat_parsing.log)
+- **Detailed logs** for debugging (auto_cheat.log + auto_cheat_parsing.log + console output)
 - **Compatible** with Ren'Py 6.99, 7.x, 8.x
 
 ## Installation
 
 Copy to `game/` folder:
-- `auto_cheat.rpy`
-- `auto_cheat_screens.rpy`
+- `auto_cheat.rpy` - main cheat script
+- `auto_cheat_screens.rpy` - UI screens
+- `auto_cheat_resource_extractor.py` - RPA extraction & RPYC decompilation script (requires Python 3.9+)
 
 Launch game. First run will:
-1. Detect system Python (`py -3`, `python`, `python3`)
-2. Auto-install unrpa via pip (for RPA extraction)
-3. Auto-download unrpyc from GitHub (for RPYC decompilation)
-4. Extract `.rpa` archives if few `.rpy` files found
-5. Decompile `.rpyc` files to `.rpy` format
-6. Scan all `.rpy` files
-7. Find all numeric variables (`default`, `define`)
-8. Detect functions that modify variables
-9. Discover labels and their changes
-10. Find screens with imagebutton and link them to labels
-11. Save to `auto_cheat_config.json`
+1. Detect system Python 3.9+ (`py -3`, `python3`, `python`)
+2. Launch `auto_cheat_resource_extractor.py` in system Python
+3. Auto-install unrpa via pip (for RPA extraction)
+4. Auto-download unrpyc from GitHub (for RPYC decompilation)
+5. Extract `.rpa` archives if few `.rpy` files found
+6. Decompile `.rpyc` files to `.rpy` format (skips existing .rpy files)
+7. Scan all `.rpy` files
+8. Find all numeric variables (`default`, `define`)
+9. Detect functions that modify variables
+10. Discover labels and their changes
+11. Find screens with imagebutton and link them to labels
+12. Save to `auto_cheat_config.json`
 
 Hints appear automatically in menus. On screens with imagebutton choices, an overlay with hints appears automatically.
 
 ### Requirements
 
-- **Python 3.9+** installed in system PATH (for automatic tool installation)
+- **Python 3.9+** installed in system PATH (for automatic RPA extraction and tool installation)
 - **Internet connection** on first run (to download tools)
 - **OR** manual tool placement (see Configuration section)
 
+**Note:** Ren'Py 6.99/7.x uses bundled Python 2.7 for the game runtime. The extractor script runs separately in system Python 3.9+, so no conflict occurs.
+
 ## How It Works
+
+### Architecture
+
+The cheat consists of two components:
+1. **`auto_cheat.rpy`** - Main script running inside Ren'Py runtime (Python 2.7 or 3.x). Handles menu parsing, overlay display, and configuration.
+2. **`auto_cheat_resource_extractor.py`** - External Python 3.9+ script. Handles RPA extraction, RPYC decompilation, and tool installation. Launched automatically by the main script when needed.
+
+This separation ensures compatibility with Ren'Py 6.99/7.x (Python 2.7) while using modern Python features for resource extraction.
 
 ### Automatic Tool Installation
 
-On first run, the script:
-1. Detects system Python via PATH (tries `py -3`, `python`, `python3`)
-2. Checks if `unrpa` and `unrpyc` are available
+On first run, the extractor script:
+1. Detects system Python (uses current interpreter)
+2. Checks if `unrpa` and `unrpyc` are available (local files, PATH, or `python -m`)
 3. If not found:
    - Installs `unrpa` via `pip install unrpa`
    - Downloads `unrpyc` from GitHub and extracts to `unrpyc/` folder
@@ -72,14 +84,16 @@ When few `.rpy` files are found in `game/` (< 10):
 1. Runs `unrpa --list` to check archive contents
 2. Extracts `.rpa` archives to temporary directory
 3. Copies only `.rpy` and `.rpyc` files to `game/`
-4. Cleans up temporary directory
+4. Skips files that already exist
+5. Cleans up temporary directory
 
 ### RPYC Decompilation
 
 For each `.rpyc` file:
-1. Uses `unrpyc` to decompile to `.rpy` format
-2. Places `.rpy` file next to `.rpyc`
-3. Scans decompiled `.rpy` for variable discovery
+1. Checks if corresponding `.rpy` file already exists (skips if found)
+2. Uses `unrpyc` to decompile to `.rpy` format
+3. Places `.rpy` file next to `.rpyc`
+4. Scans decompiled `.rpy` for variable discovery
 
 ### Auto-Discovery
 
@@ -144,10 +158,15 @@ Contains four sections:
 At top of file:
 - `DEBUG_MODE` - show all found variables
 - `DISCOVER_USED_VARIABLES` - discover variables from `$` assignments (default: `False`)
-- `DECOMPILE_RPYC` - enable RPYC decompilation (default: `True`)
 - `FONT_SIZE_MODIFIER` - hint text size
 - `LOGGING_MODE` - enable/disable logging
 - `MAX_LOG_SIZE` - max log file size before rotation
+
+### Settings in auto_cheat_resource_extractor.py
+
+At top of file:
+- `DECOMPILE_RPYC` - enable RPYC decompilation (default: `True`)
+- `PIP_PACKAGES` - packages to install via pip (default: `['unrpa']`)
 
 ### Colors
 
@@ -208,6 +227,11 @@ Player sees:
 - Screen must use imagebutton with action Jump/Call/Return
 - Check `auto_cheat.log` for errors
 
+**Extractor not launching:**
+- Ensure Python 3.9+ is installed and in PATH
+- Check `auto_cheat_parsing.log` for the exact command to run manually
+- Run the command from the log in your terminal
+
 **Tools not installing:**
 - Ensure Python 3.9+ is installed and in PATH
 - Check internet connection
@@ -218,11 +242,12 @@ Player sees:
 - Check `auto_cheat_parsing.log` for unrpa errors
 - Ensure sufficient disk space
 - Try setting `UNRPA_PATH` manually
+- Run extractor manually: `python3 auto_cheat_resource_extractor.py --gamedir <path> --basedir <path> --log-file <path>`
 
 ## Compatibility
 
-- Ren'Py 6.99.x with Python 2.7 - Full support
-- Ren'Py 7.x with Python 2.7 - Full support
+- Ren'Py 6.99.x with Python 2.7 - Full support (extractor runs in system Python 3.9+)
+- Ren'Py 7.x with Python 2.7 - Full support (extractor runs in system Python 3.9+)
 - Ren'Py 8.0+ with Python 3.9+ - Full support
 
 ## Testing
@@ -242,9 +267,9 @@ To run tests:
 
 ## Возможности
 
-- **Автоматическая распаковка RPA архивов** - извлекает .rpa файлы при необходимости
+- **Автоматическая распаковка RPA архивов** - извлекает .rpa файлы при необходимости через внешний Python 3.9+ скрипт
 - **Автоматическая установка инструментов** - устанавливает unrpa и unrpyc через pip/GitHub
-- **Декомпиляция RPYC** - декомпилирует .rpyc файлы в читаемый .rpy формат
+- **Декомпиляция RPYC** - декомпилирует .rpyc файлы в читаемый .rpy формат (пропускает, если .rpy уже существует)
 - **Автоматическая настройка** - находит все переменные, функции, label'ы и screen'ы
 - **Подсказки в меню** - показывает изменения переменных с цветами
 - **Автоматический overlay для imagebutton** - показывает подсказки прямо на экранах с выборами
@@ -254,44 +279,56 @@ To run tests:
 - **Цветные подсказки** - зелёный для +=, красный для -=, синий для =
 - **Высокая производительность** с кэшированием
 - **Гибкая настройка** через JSON
-- **Подробные логи** для отладки (auto_cheat.log + auto_cheat_parsing.log)
+- **Подробные логи** для отладки (auto_cheat.log + auto_cheat_parsing.log + вывод в консоль)
 - **Совместимость** с Ren'Py 6.99, 7.x, 8.x
 - **104 юнит-теста**
 
 ## Установка
 
 Скопируйте в папку `game/`:
-- `auto_cheat.rpy`
-- `auto_cheat_screens.rpy`
+- `auto_cheat.rpy` - основной скрипт чита
+- `auto_cheat_screens.rpy` - экраны UI
+- `auto_cheat_resource_extractor.py` - скрипт распаковки RPA и декомпиляции RPYC (требует Python 3.9+)
 
 Запустите игру. При первом запуске скрипт:
-1. Обнаружит системный Python (`py -3`, `python`, `python3`)
-2. Автоматически установит unrpa через pip (для распаковки RPA)
-3. Автоматически скачает unrpyc с GitHub (для декомпиляции RPYC)
-4. Извлечёт `.rpa` архивы, если найдено мало `.rpy` файлов
-5. Декомпилирует `.rpyc` файлы в `.rpy` формат
-6. Просканирует все `.rpy` файлы
-7. Найдёт все числовые переменные (`default`, `define`)
-8. Обнаружит функции, меняющие переменные
-9. Найдёт label'ы и их изменения
-10. Найдёт screen'ы с imagebutton и свяжет их с label'ами
-11. Сохранит результат в `auto_cheat_config.json`
+1. Обнаружит системный Python 3.9+ (`py -3`, `python3`, `python`)
+2. Запустит `auto_cheat_resource_extractor.py` в системном Python
+3. Автоматически установит unrpa через pip (для распаковки RPA)
+4. Автоматически скачает unrpyc с GitHub (для декомпиляции RPYC)
+5. Извлечёт `.rpa` архивы, если найдено мало `.rpy` файлов
+6. Декомпилирует `.rpyc` файлы в `.rpy` формат (пропустит существующие .rpy)
+7. Просканирует все `.rpy` файлы
+8. Найдёт все числовые переменные (`default`, `define`)
+9. Обнаружит функции, меняющие переменные
+10. Найдёт label'ы и их изменения
+11. Найдёт screen'ы с imagebutton и свяжет их с label'ами
+12. Сохранит результат в `auto_cheat_config.json`
 
 Подсказки появляются автоматически в меню. На экранах с imagebutton автоматически появляется overlay с подсказками.
 
 ### Требования
 
-- **Python 3.9+** установлен в системном PATH (для автоматической установки инструментов)
+- **Python 3.9+** установлен в системном PATH (для автоматической распаковки RPA и установки инструментов)
 - **Подключение к интернету** при первом запуске (для скачивания инструментов)
 - **ИЛИ** ручное размещение инструментов (см. секцию Конфигурация)
 
+**Примечание:** Ren'Py 6.99/7.x использует встроенный Python 2.7 для запуска игры. Скрипт экстрактора запускается отдельно в системном Python 3.9+, поэтому конфликтов не возникает.
+
 ## Как работает
+
+### Архитектура
+
+Чит состоит из двух компонентов:
+1. **`auto_cheat.rpy`** - Основной скрипт, работающий внутри Ren'Py (Python 2.7 или 3.x). Отвечает за парсинг меню, отображение overlay и конфигурацию.
+2. **`auto_cheat_resource_extractor.py`** - Внешний Python 3.9+ скрипт. Отвечает за распаковку RPA, декомпиляцию RPYC и установку инструментов. Запускается автоматически основным скриптом при необходимости.
+
+Такое разделение обеспечивает совместимость с Ren'Py 6.99/7.x (Python 2.7), используя современные возможности Python для извлечения ресурсов.
 
 ### Автоматическая установка инструментов
 
-При первом запуске скрипт:
-1. Обнаруживает системный Python через PATH (пробует `py -3`, `python`, `python3`)
-2. Проверяет доступность `unrpa` и `unrpyc`
+При первом запуске скрипт экстрактора:
+1. Обнаруживает системный Python (использует текущий интерпретатор)
+2. Проверяет доступность `unrpa` и `unrpyc` (локальные файлы, PATH или `python -m`)
 3. Если не найдены:
    - Устанавливает `unrpa` через `pip install unrpa`
    - Скачивает `unrpyc` с GitHub и извлекает в папку `unrpyc/`
@@ -303,14 +340,16 @@ To run tests:
 1. Запускает `unrpa --list` для проверки содержимого архива
 2. Извлекает `.rpa` архивы во временную директорию
 3. Копирует только `.rpy` и `.rpyc` файлы в `game/`
-4. Очищает временную директорию
+4. Пропускает файлы, которые уже существуют
+5. Очищает временную директорию
 
 ### Декомпиляция RPYC
 
 Для каждого `.rpyc` файла:
-1. Использует `unrpyc` для декомпиляции в `.rpy` формат
-2. Помещает `.rpy` файл рядом с `.rpyc`
-3. Сканирует декомпилированный `.rpy` для обнаружения переменных
+1. Проверяет, существует ли уже соответствующий `.rpy` файл (пропускает, если найден)
+2. Использует `unrpyc` для декомпиляции в `.rpy` формат
+3. Помещает `.rpy` файл рядом с `.rpyc`
+4. Сканирует декомпилированный `.rpy` для обнаружения переменных
 
 ### Авто-обнаружение
 
@@ -369,10 +408,15 @@ Overlay появляется автоматически - не нужно наж
 В начале файла:
 - `DEBUG_MODE` - показывать все найденные переменные
 - `DISCOVER_USED_VARIABLES` - обнаруживать переменные из `$` присваиваний (по умолчанию: `False`)
-- `DECOMPILE_RPYC` - включить декомпиляцию RPYC (по умолчанию: `True`)
 - `FONT_SIZE_MODIFIER` - размер текста подсказок
 - `LOGGING_MODE` - включить/выключить логирование
 - `MAX_LOG_SIZE` - максимальный размер лога перед ротацией
+
+### Настройки в auto_cheat_resource_extractor.py
+
+В начале файла:
+- `DECOMPILE_RPYC` - включить декомпиляцию RPYC (по умолчанию: `True`)
+- `PIP_PACKAGES` - пакеты для установки через pip (по умолчанию: `['unrpa']`)
 
 ### Цвета
 
@@ -416,6 +460,11 @@ Overlay появляется автоматически - не нужно наж
 - Screen должен использовать imagebutton с action Jump/Call/Return
 - Проверьте `auto_cheat.log` на ошибки
 
+**Экстрактор не запускается:**
+- Убедитесь что Python 3.9+ установлен и в PATH
+- Проверьте `auto_cheat_parsing.log` - там будет точная команда для ручного запуска
+- Выполните команду из лога в терминале
+
 **Инструменты не устанавливаются:**
 - Убедитесь что Python 3.9+ установлен и в PATH
 - Проверьте подключение к интернету
@@ -426,11 +475,12 @@ Overlay появляется автоматически - не нужно наж
 - Проверьте `auto_cheat_parsing.log` на ошибки unrpa
 - Убедитесь что достаточно места на диске
 - Попробуйте установить `UNRPA_PATH` вручную
+- Запустите экстрактор вручную: `python3 auto_cheat_resource_extractor.py --gamedir <путь> --basedir <путь> --log-file <путь>`
 
 ## Совместимость
 
-- Ren'Py 6.99.x с Python 2.7 - Полная поддержка
-- Ren'Py 7.x с Python 2.7 - Полная поддержка
+- Ren'Py 6.99.x с Python 2.7 - Полная поддержка (экстрактор работает в системном Python 3.9+)
+- Ren'Py 7.x с Python 2.7 - Полная поддержка (экстрактор работает в системном Python 3.9+)
 - Ren'Py 8.0+ с Python 3.9+ - Полная поддержка
 
 ## Тестирование
