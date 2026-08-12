@@ -23,10 +23,19 @@ class MockConfig:
     gamedir = tempfile.gettempdir()
     overlay_functions = []
 
+class MockPreferences:
+    """Мок для renpy.game.preferences."""
+    language = None
+
+class MockGame:
+    """Мок для renpy.game."""
+    preferences = MockPreferences()
+
 class MockRenpy:
     """Мок для модуля renpy."""
     store = MockStore()
     config = MockConfig()
+    game = MockGame()
 
     @staticmethod
     def get_filename_line():
@@ -148,54 +157,9 @@ def cheat_fresh(cheat):
     # Сбрасываем глобальные словари к известному состоянию
     cheat['MENU_VARIABLE_NAMES'].clear()
     cheat['FUNCTION_PARSER_PATTERNS'].clear()
+    # Сбрасываем язык перевода
+    cheat['renpy'].game.preferences.language = None
     return cheat
-
-# =========================================================================
-# DISCOVERY ENVIRONMENT FIXTURE
-# =========================================================================
-@pytest.fixture
-def discovery_env(cheat_fresh, tmp_path):
-    """Настраивает окружение для тестов авто-обнаружения."""
-    cheat = cheat_fresh
-    
-    # Настраиваем gamedir
-    game_dir = tmp_path / 'game'
-    game_dir.mkdir(exist_ok=True)
-    cheat['config'].gamedir = str(game_dir)
-    
-    # Настраиваем известные переменные
-    cheat['MENU_VARIABLE_NAMES'].update({
-        'var1': 'var1',
-        'var2': 'var2',
-        'mc_karma': 'Karma',
-        'mc_truth': 'Truth',
-        'karma_more': 'KarmaMore',
-        'leiaRS': 'Leia RS',
-    })
-    
-    # Настраиваем паттерны функций
-    cheat['FUNCTION_PARSER_PATTERNS'].update({
-        'add_points': 'VAR, VAL, _',
-    })
-    
-    # Отключаем логирование для чистоты тестов
-    cheat['LOGGING_MODE'] = False
-    
-    return cheat, tmp_path
-
-
-def write_rpy(tmp_path, filename, content):
-    """Создаёт .rpy файл в game/ директории."""
-    game_dir = tmp_path / 'game'
-    game_dir.mkdir(exist_ok=True)
-    rpy_file = game_dir / filename
-    rpy_file.write_text(content, encoding='utf-8')
-    return rpy_file
-
-
-def get_rpy_files(cheat, tmp_path):
-    """Получает список .rpy файлов через функцию из auto_cheat.rpy."""
-    return cheat['get_all_rpy_files']()
 
 # =========================================================================
 # HELPER FUNCTIONS FOR TESTS
@@ -212,7 +176,6 @@ def write_rpy(tmp_path, filename, content):
 def get_rpy_files(cheat, tmp_path):
     """Получает список .rpy файлов через функцию из auto_cheat.rpy."""
     return cheat['get_all_rpy_files']()
-
 
 # =========================================================================
 # DISCOVERY ENVIRONMENT FIXTURE

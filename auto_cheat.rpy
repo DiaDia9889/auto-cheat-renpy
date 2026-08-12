@@ -169,7 +169,7 @@ init python:
     # COMPILED REGEX
     # =========================================================================
     CHOICE_PATTERN = re.compile(r'(?:"([^"]+)"|\'([^\']+)\')\s*(?:if\s+[^:]+)?\s*:')
-    CALC_PATTERN = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*([\+\-]?)=\s*([0-9\.]+)')
+    CALC_PATTERN = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*([\+\-]?)=\s*([0-9\.]+|True|False)\b')
     TAG_PATTERN = re.compile(r'\{[^}]*\}')
 
     # =========================================================================
@@ -784,6 +784,70 @@ init python:
         _menu_parse_cache[cache_key] = current_blocks
         return current_blocks
         
+    def find_original_text_via_translation(caption_clean, filename):
+        """Ищет оригинальный текст варианта меню через файлы перевода tl/<language>/."""
+        try:
+            # Определяем текущий язык перевода
+            language = None
+            try:
+                language = renpy.game.preferences.language
+            except:
+                try:
+                    language = renpy.store._preferences.language
+                except:
+                    pass
+            
+            if not language:
+                write_cheat_log("DEBUG: No translation language detected")
+                return None
+            
+            # Нормализуем filename
+            if filename.startswith("game/"): filename = filename[5:]
+            elif filename.startswith("game\\"): filename = filename[5:]
+            
+            # Путь к файлу перевода: game/tl/<language>/<filename>
+            tl_path = os.path.join(config.gamedir, "tl", language, filename)
+            
+            if not os.path.exists(tl_path):
+                write_cheat_log("DEBUG: Translation file not found: {}".format(tl_path))
+                return None
+            
+            lines = get_file_content(tl_path)
+            if not lines:
+                return None
+            
+            lookup_caption = normalize_text(caption_clean)
+            
+            # Ищем пары old/new в файле перевода
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped.startswith('old '):
+                    continue
+                
+                # Извлекаем текст old
+                old_match = re.match(r'old\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', stripped)
+                if not old_match:
+                    continue
+                old_text = old_match.group(1) if old_match.group(1) is not None else old_match.group(2)
+                
+                # Проверяем следующую строку на new
+                if i + 1 < len(lines):
+                    next_stripped = lines[i + 1].strip()
+                    if next_stripped.startswith('new '):
+                        new_match = re.match(r'new\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', next_stripped)
+                        if new_match:
+                            new_text = new_match.group(1) if new_match.group(1) is not None else new_match.group(2)
+                            
+                            if normalize_text(new_text) == lookup_caption:
+                                write_cheat_log("DEBUG: Translation mapping found: '{}' -> '{}'".format(new_text, old_text))
+                                return old_text
+            
+            write_cheat_log("DEBUG: No translation mapping for '{}' in {}".format(caption_clean, tl_path))
+            return None
+        except Exception as e:
+            write_cheat_log("DEBUG: Translation lookup error: {}".format(e))
+            return None
+
     def core_menu_parser(caption_clean):
         filename, line_number = renpy.get_filename_line()
         if not filename: return caption_clean
@@ -806,24 +870,25 @@ init python:
                 return caption_clean
 
             # ============================================================
-            # ОПРЕДЕЛЯЕМ ЦЕЛЕВОЙ menu: БЛОК ПО НОМЕРУ СТРОКИ
+            # ОПРЕДЕЛЯЕМ ЦЕЛЕВОЙ menu: БЛОК
             # ============================================================
             target_menu_idx = -1
+            lookup_caption_orig = None  # Оригинальный текст (если нашли через перевод)
             
+            # Способ 1: По номеру строки
             if line_number and line_number > 0:
-                # line_number из Ren'Py - 1-based, menu_locations - 0-based
                 current_line_0based = line_number - 1
-                # Берём последний menu:, который находится ДО или НА текущей строке
                 for menu_idx in menu_locations:
                     if menu_idx <= current_line_0based:
                         target_menu_idx = menu_idx
                     else:
                         break
-                write_cheat_log("DEBUG: Line {} -> using menu at line {}".format(line_number, target_menu_idx))
+                if target_menu_idx != -1:
+                    write_cheat_log("DEBUG: Line {} -> using menu at line {}".format(line_number, target_menu_idx))
             
-            # Fallback: если не удалось определить по строке, ищем по тексту (старая логика)
+            # Способ 2: Поиск по переведённому тексту (прямое совпадение)
             if target_menu_idx == -1:
-                write_cheat_log("DEBUG: Could not determine menu by line number, falling back to text search")
+                write_cheat_log("DEBUG: Menu not found by line, trying direct text search...")
                 for menu_idx in menu_locations:
                     current_blocks = get_parsed_menu(filepath, menu_idx, lines)
                     for ct in current_blocks.keys():
@@ -834,8 +899,25 @@ init python:
                     if target_menu_idx != -1:
                         break
             
+            # Способ 3: Поиск через файл перевода (для игры на другом языке)
             if target_menu_idx == -1:
-                write_cheat_log("DEBUG: Could not determine target menu")
+                write_cheat_log("DEBUG: Direct text search failed, trying translation lookup...")
+                original_text = find_original_text_via_translation(caption_clean, filename)
+                if original_text:
+                    lookup_caption_orig = normalize_text(original_text)
+                    write_cheat_log("DEBUG: Translation found original: '{}'".format(original_text))
+                    for menu_idx in menu_locations:
+                        current_blocks = get_parsed_menu(filepath, menu_idx, lines)
+                        for ct in current_blocks.keys():
+                            ct_normalized = normalize_text(ct)
+                            if lookup_caption_orig == ct_normalized or lookup_caption_orig in ct_normalized or ct_normalized in lookup_caption_orig:
+                                target_menu_idx = menu_idx
+                                break
+                        if target_menu_idx != -1:
+                            break
+            
+            if target_menu_idx == -1:
+                write_cheat_log("DEBUG: Could not determine target menu (all methods failed)")
                 return caption_clean
 
             # ============================================================
@@ -844,7 +926,7 @@ init python:
             menu_blocks = get_parsed_menu(filepath, target_menu_idx, lines)
             write_cheat_log("DEBUG: Using menu at line {} with {} variants".format(target_menu_idx, len(menu_blocks)))
             
-            # Ищем вариант ТОЛЬКО в целевом menu:
+            # Ищем вариант: сначала по переведённому тексту
             original_key = None
             for ct in menu_blocks.keys():
                 ct_normalized = normalize_text(ct)
@@ -852,8 +934,40 @@ init python:
                     original_key = ct
                     break
             
+            # Если не нашли — получаем оригинальный текст через перевод
+            if original_key is None:
+                # lookup_caption_orig мог быть определён ранее (при поиске target_menu_idx)
+                if lookup_caption_orig is None:
+                    original_text = find_original_text_via_translation(caption_clean, filename)
+                    if original_text:
+                        lookup_caption_orig = normalize_text(original_text)
+                        write_cheat_log("DEBUG: Translation found original for key search: '{}'".format(original_text))
+                
+                if lookup_caption_orig:
+                    for ct in menu_blocks.keys():
+                        ct_normalized = normalize_text(ct)
+                        if lookup_caption_orig == ct_normalized or lookup_caption_orig in ct_normalized or ct_normalized in lookup_caption_orig:
+                            original_key = ct
+                            break
+            
             if original_key is None:
                 write_cheat_log("DEBUG: Caption '{}' not found in menu at line {}".format(lookup_caption, target_menu_idx))
+                return caption_clean
+            
+            # Если не нашли — пробуем через файл перевода (для игры на другом языке)
+            if original_key is None:
+                write_cheat_log("DEBUG: Caption not found directly, trying translation lookup...")
+                original_text = find_original_text_via_translation(caption_clean, filename)
+                if original_text:
+                    lookup_caption_orig = normalize_text(original_text)
+                    for ct in menu_blocks.keys():
+                        ct_normalized = normalize_text(ct)
+                        if lookup_caption_orig == ct_normalized or lookup_caption_orig in ct_normalized or ct_normalized in lookup_caption_orig:
+                            original_key = ct
+                            break
+            
+            if original_key is None:
+                write_cheat_log("DEBUG: Caption '{}' not found in menu at line {} (even via translation)".format(lookup_caption, target_menu_idx))
                 return caption_clean
 
             # ============================================================

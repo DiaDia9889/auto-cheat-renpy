@@ -527,3 +527,332 @@ class TestDuplicateMenuChoices:
         cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[2])
         result = cheat['core_menu_parser']('Go')
         assert '+=100' in result
+
+class TestBooleanValues:
+    """Парсинг булевых значений True/False в меню."""
+
+    def test_assign_true(self, setup_test_env):
+        cheat, tmp_path = setup_test_env
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ emmeline_interest = True
+        "Ignore her":
+            $ emmeline_interest = False
+''')
+        cheat['MENU_VARIABLE_NAMES']['emmeline_interest'] = 'emmeline_interest'
+
+        result = cheat['core_menu_parser']('Say hello')
+        assert 'emmeline_interest' in result
+        assert '= True' in result
+
+        result = cheat['core_menu_parser']('Ignore her')
+        assert 'emmeline_interest' in result
+        assert '= False' in result
+
+    def test_assign_true_with_color(self, setup_test_env):
+        cheat, tmp_path = setup_test_env
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Accept quest":
+            $ quest_started = True
+''')
+        cheat['MENU_VARIABLE_NAMES']['quest_started'] = 'quest_started'
+
+        result = cheat['core_menu_parser']('Accept quest')
+        assert 'quest_started' in result
+        assert '= True' in result
+        # True присваивается через =, значит цвет COLOR_EQUAL
+        assert cheat['COLOR_EQUAL'] in result
+
+    def test_assign_false_with_color(self, setup_test_env):
+        cheat, tmp_path = setup_test_env
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Decline quest":
+            $ quest_started = False
+''')
+        cheat['MENU_VARIABLE_NAMES']['quest_started'] = 'quest_started'
+
+        result = cheat['core_menu_parser']('Decline quest')
+        assert 'quest_started' in result
+        assert '= False' in result
+        assert cheat['COLOR_EQUAL'] in result
+
+    def test_boolean_and_numeric_together(self, setup_test_env):
+        cheat, tmp_path = setup_test_env
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Complex choice":
+            $ flag = True
+            $ score += 5
+''')
+        cheat['MENU_VARIABLE_NAMES']['flag'] = 'flag'
+        cheat['MENU_VARIABLE_NAMES']['score'] = 'score'
+
+        result = cheat['core_menu_parser']('Complex choice')
+        assert 'flag' in result
+        assert '= True' in result
+        assert 'score' in result
+        assert '+=5' in result
+
+    def test_boolean_with_full_scene_code(self, setup_test_env):
+        """Реальный кейс: меню с scene, pause, achievement и булевым значением."""
+        cheat, tmp_path = setup_test_env
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ emmeline_interest = True
+            mc "Hey."
+            scene 12 with dissolve
+            $ renpy.pause()
+            scene 123 with dissolve
+            $ achievement.grant("sa1_1")
+            $ achievement.sync()
+            s "Did I just see a grown-assed woman skipping?"
+            pass
+        "Ignore her":
+            $ emmeline_interest = False
+            scene 1234 with dissolve
+            s "That was kind of a harsh diss."
+            pass
+''')
+        cheat['MENU_VARIABLE_NAMES']['emmeline_interest'] = 'emmeline_interest'
+
+        result = cheat['core_menu_parser']('Say hello')
+        assert 'emmeline_interest' in result
+        assert '= True' in result
+
+        result = cheat['core_menu_parser']('Ignore her')
+        assert 'emmeline_interest' in result
+        assert '= False' in result
+
+    def test_boolean_unknown_var_debug_mode(self, setup_test_env):
+        """В DEBUG_MODE неизвестная булева переменная показывается с префиксом DEBUG."""
+        cheat, tmp_path = setup_test_env
+        cheat['DEBUG_MODE'] = True
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Choice":
+            $ unknown_flag = True
+''')
+        result = cheat['core_menu_parser']('Choice')
+        assert 'DEBUG:unknown_flag' in result
+        assert '= True' in result
+
+    def test_boolean_unknown_var_non_debug_mode(self, setup_test_env):
+        """Без DEBUG_MODE неизвестная булева переменная не показывается."""
+        cheat, tmp_path = setup_test_env
+        cheat['DEBUG_MODE'] = False
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Choice":
+            $ unknown_flag = True
+''')
+        result = cheat['core_menu_parser']('Choice')
+        assert result == 'Choice'
+
+
+class TestTranslationLookup:
+    """Поиск вариантов меню через файлы перевода (игра на другом языке)."""
+
+    def write_translation_file(self, tmp_path, language, filename, content):
+        """Создаёт файл перевода в game/tl/<language>/<filename>."""
+        tl_dir = tmp_path / 'game' / 'tl' / language
+        tl_dir.mkdir(parents=True, exist_ok=True)
+        tl_file = tl_dir / filename
+        tl_file.write_text(content, encoding='utf-8')
+        return tl_file
+
+    def test_russian_translation_finds_english_choice(self, setup_test_env):
+        """Русский текст варианта находит английский оригинал через tl/russian/."""
+        cheat, tmp_path = setup_test_env
+
+        # Оригинальный файл на английском
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ emmeline_interest = True
+        "Ignore her":
+            $ emmeline_interest = False
+''')
+        cheat['MENU_VARIABLE_NAMES']['emmeline_interest'] = 'emmeline_interest'
+
+        # Файл перевода
+        self.write_translation_file(tmp_path, 'russian', 'test_scene.rpy', '''
+translate test_menu_1:
+    old "Say hello"
+    new "Поздороваться"
+
+translate test_menu_2:
+    old "Ignore her"
+    new "Проигнорировать"
+''')
+
+        # Устанавливаем язык перевода
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        # Ищем по русскому тексту
+        result = cheat['core_menu_parser']('Поздороваться')
+        assert 'emmeline_interest' in result
+        assert '= True' in result
+
+        result = cheat['core_menu_parser']('Проигнорировать')
+        assert 'emmeline_interest' in result
+        assert '= False' in result
+
+    def test_translation_with_numeric_values(self, setup_test_env):
+        """Перевод работает и с числовыми значениями."""
+        cheat, tmp_path = setup_test_env
+
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Go left":
+            $ score += 10
+        "Go right":
+            $ score -= 5
+''')
+        cheat['MENU_VARIABLE_NAMES']['score'] = 'score'
+
+        self.write_translation_file(tmp_path, 'russian', 'test_scene.rpy', '''
+translate m1:
+    old "Go left"
+    new "Идти налево"
+
+translate m2:
+    old "Go right"
+    new "Идти направо"
+''')
+
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        result = cheat['core_menu_parser']('Идти налево')
+        assert 'score' in result
+        assert '+=10' in result
+
+        result = cheat['core_menu_parser']('Идти направо')
+        assert 'score' in result
+        assert '-=5' in result
+
+    def test_translation_with_tags_in_text(self, setup_test_env):
+        """Перевод работает с Ren'Py тегами в тексте."""
+        cheat, tmp_path = setup_test_env
+
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Hello {color=#fff}world{/color}":
+            $ var1 += 1
+''')
+        cheat['MENU_VARIABLE_NAMES']['var1'] = 'var1'
+
+        self.write_translation_file(tmp_path, 'russian', 'test_scene.rpy', '''
+translate m1:
+    old "Hello {color=#fff}world{/color}"
+    new "Привет {color=#fff}мир{/color}"
+''')
+
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        result = cheat['core_menu_parser']('Привет {color=#fff}мир{/color}')
+        assert 'var1' in result
+        assert '+=1' in result
+
+    def test_no_translation_file_falls_back(self, setup_test_env):
+        """Если файла перевода нет, подсказка не добавляется (текст не найден)."""
+        cheat, tmp_path = setup_test_env
+
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ var1 += 1
+''')
+        cheat['MENU_VARIABLE_NAMES']['var1'] = 'var1'
+
+        # Язык установлен, но файла перевода нет
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        result = cheat['core_menu_parser']('Поздороваться')
+        assert result == 'Поздороваться'
+
+    def test_no_language_set_uses_direct_match(self, setup_test_env):
+        """Если язык не установлен, работает прямой поиск по тексту."""
+        cheat, tmp_path = setup_test_env
+
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ var1 += 1
+''')
+        cheat['MENU_VARIABLE_NAMES']['var1'] = 'var1'
+
+        # Язык не установлен
+        cheat['renpy'].game.preferences.language = None
+
+        result = cheat['core_menu_parser']('Say hello')
+        assert 'var1' in result
+        assert '+=1' in result
+
+    def test_translation_with_multiple_menus(self, setup_test_env):
+        """Перевод работает корректно с несколькими menu: блоками."""
+        cheat, tmp_path = setup_test_env
+
+        content = '''label test:
+    menu:
+        "Go left":
+            $ var1 += 1
+
+    menu:
+        "Go left":
+            $ var1 += 100
+'''
+        write_test_rpy(tmp_path, content)
+        cheat['MENU_VARIABLE_NAMES']['var1'] = 'var1'
+
+        self.write_translation_file(tmp_path, 'russian', 'test_scene.rpy', '''
+translate m1:
+    old "Go left"
+    new "Идти налево"
+''')
+
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        # Определяем строки menu:
+        lines = content.splitlines()
+        menu_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith('menu') and ':' in line:
+                menu_lines.append(i + 1)
+
+        # Первый menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[0])
+        result = cheat['core_menu_parser']('Идти налево')
+        assert '+=1' in result
+        assert '+=100' not in result
+
+        # Второй menu:
+        cheat['renpy'].get_filename_line = lambda: ('game/test_scene.rpy', menu_lines[1])
+        result = cheat['core_menu_parser']('Идти налево')
+        assert '+=100' in result
+
+    def test_translation_single_quotes(self, setup_test_env):
+        """Файл перевода с одинарными кавычками."""
+        cheat, tmp_path = setup_test_env
+
+        write_test_rpy(tmp_path, '''label test:
+    menu:
+        "Say hello":
+            $ var1 += 1
+''')
+        cheat['MENU_VARIABLE_NAMES']['var1'] = 'var1'
+
+        self.write_translation_file(tmp_path, 'russian', 'test_scene.rpy', """
+translate m1:
+    old 'Say hello'
+    new 'Поздороваться'
+""")
+
+        cheat['renpy'].game.preferences.language = 'russian'
+
+        result = cheat['core_menu_parser']('Поздороваться')
+        assert 'var1' in result
+        assert '+=1' in result
