@@ -25,15 +25,13 @@ import io
 # CONFIGURATION & ARGUMENTS
 # =========================================================================
 parser = argparse.ArgumentParser(description="Ren'Py Resource Extractor")
-parser.add_argument("--gamedir", required=True, help="Path to the game's 'game/' directory")
 parser.add_argument("--basedir", required=True, help="Path to the game's base directory (parent of 'game/')")
-parser.add_argument("--log-file", required=True, help="Path to the discovery log file")
 args = parser.parse_args()
 
-# ВАЖНО: Нормализуем пути, чтобы избежать проблем с os.path.exists
-CONFIG_GAMEDIR = os.path.abspath(args.gamedir)
+# Вычисляем пути из basedir
 CONFIG_BASEDIR = os.path.abspath(args.basedir)
-DISCOVERY_LOG_PATH = os.path.abspath(args.log_file)
+CONFIG_GAMEDIR = os.path.join(CONFIG_BASEDIR, 'game')
+DISCOVERY_LOG_PATH = os.path.join(CONFIG_GAMEDIR, 'auto_cheat_parsing.log')
 
 UNRPYC_PATH = None
 UNRPA_PATH = None

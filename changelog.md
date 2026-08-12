@@ -1,5 +1,27 @@
 # Changelog
 
+## [8.1.0] — 2026-07-22
+### Added
+- **Boolean value support in `CALC_PATTERN`:** Regex now matches `True` and `False` assignments (e.g. `$ emmeline_interest = True`). Word boundary `\b` prevents partial matches like `TrueStory`.
+- **Translation-aware menu parsing:** New `find_original_text_via_translation()` function looks up `game/tl/<language>/<filename>.rpy` to map translated choice text back to the original English text. Enables hints when playing in a non-English language.
+- **Three-tier menu block detection:** `core_menu_parser` now uses three fallback strategies to identify the active `menu:` block:
+  1. Line number from `renpy.get_filename_line()`
+  2. Direct text match in original file
+  3. Translation lookup → text match with original language
+- **Translation-aware choice key search:** After identifying the `menu:` block, choice text is searched first by translated text, then by original text (via translation lookup).
+- **Mock infrastructure for translation tests:** Added `MockPreferences` and `MockGame` classes to `conftest.py` with `renpy.game.preferences.language` support. Language is reset in `cheat_fresh` fixture.
+
+### Changed
+- **`CALC_PATTERN` updated:** From `([0-9\.]+)` to `([0-9\.]+|True|False)\b` to support boolean assignments with word boundary protection.
+- **`core_menu_parser` refactored:** Choice search now separates menu block identification from choice key matching, allowing translation fallback at both stages independently.
+
+### Fixed
+- **`$ var = True` not detected:** `CALC_PATTERN` previously only matched numeric values (`[0-9\.]+`), silently ignoring boolean assignments like `$ emmeline_interest = True`.
+- **Translated choices not found:** When playing in a non-English language, `core_menu_parser` received translated text but searched for it in the original `.rpy` file, finding no match. Now resolves original text via `tl/` translation files.
+- **Duplicate choices with translation:** Combining line-number-based `menu:` detection with translation lookup now correctly handles identical choice names across multiple `menu:` blocks in translated games.
+
+---
+
 ## [8.0.1] — 2026-07-21
 ### Fixed
 - **Duplicate menu choices showing wrong hints:** When multiple `menu:` blocks in the same file contained identical choice texts (e.g. "Var1", "Var2", "Var3"), `core_menu_parser` always matched the first occurrence and displayed incorrect variable changes. Now the parser uses `line_number` from `renpy.get_filename_line()` to determine which specific `menu:` block is currently active, ensuring hints reflect the correct block's changes.

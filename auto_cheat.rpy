@@ -33,6 +33,7 @@ init python:
     LOGGING_MODE = True
     LOG_FILE_PATH = os.path.join(config.gamedir, "auto_cheat.log")
     MAX_LOG_SIZE = 5 * 1024 * 1024
+    MIN_RPY_FILES_FOR_EXTRACTION = 10  # Минимум .rpy файлов, ниже которого запускается экстрактор
 
     DISCOVERY_LOG_PATH = os.path.join(config.gamedir, "auto_cheat_parsing.log")
 
@@ -249,9 +250,7 @@ init python:
 
         # Формируем аргументы заранее — они нужны и для автозапуска, и для инструкции по ручному запуску
         extractor_args = [
-            "--gamedir", config.gamedir,
-            "--basedir", os.path.dirname(config.gamedir),
-            "--log-file", DISCOVERY_LOG_PATH
+            "--basedir", os.path.dirname(config.gamedir)
         ]
 
         python_cmd = find_working_python_cmd()
@@ -654,7 +653,7 @@ init python:
         test_files = get_all_rpy_files()
         
         # Если мало файлов, запускаем внешний скрипт распаковки
-        if len(test_files) < 10:
+        if len(test_files) < MIN_RPY_FILES_FOR_EXTRACTION:
             write_discovery_log("[INIT] Few .rpy files found ({}). Attempting RPA extraction via external script...".format(len(test_files)))
             run_resource_extractor()
         
