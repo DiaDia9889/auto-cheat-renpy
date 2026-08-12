@@ -1007,7 +1007,7 @@ init python:
                             else:
                                 color = COLOR_MINUS
                         elif DEBUG_MODE: 
-                            disp_name = "DEBUG:" + var_name
+                            disp_name = "D:" + var_name
                             color = COLOR_DEBUG
                         else: continue
                         
