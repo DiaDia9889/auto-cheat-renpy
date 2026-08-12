@@ -1,5 +1,15 @@
 # Changelog
 
+## [8.0.1] — 2026-07-21
+### Fixed
+- **Duplicate menu choices showing wrong hints:** When multiple `menu:` blocks in the same file contained identical choice texts (e.g. "Var1", "Var2", "Var3"), `core_menu_parser` always matched the first occurrence and displayed incorrect variable changes. Now the parser uses `line_number` from `renpy.get_filename_line()` to determine which specific `menu:` block is currently active, ensuring hints reflect the correct block's changes.
+- **Menu block identification by line number:** Added logic to select the target `menu:` block based on the current execution line rather than text matching across all blocks. Falls back to text search only when `line_number` is unavailable.
+
+### Added
+- **Integration tests for duplicate choices:** New `TestDuplicateMenuChoices` class with 4 test cases covering identical choice names across multiple `menu:` blocks, line-number-based block selection, fallback behavior, and three-menu scenarios.
+
+---
+
 ## [8.0.0] — 2026-07-20
 ### Added
 - **`auto_cheat_resource_extractor.py`:** Standalone Python 3.9+ script for RPA archive extraction and RPYC decompilation. Extracted from `auto_cheat.rpy` to reduce complexity and avoid Python 2.7 runtime limitations.

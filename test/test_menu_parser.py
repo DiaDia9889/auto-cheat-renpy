@@ -326,10 +326,10 @@ class TestDuplicateMenuChoices:
         cheat, tmp_path = setup_test_env
         
         content = '''label test:
-    scene 6ch_rallycross03 with dissolve
-    dar "Восток. А стрелка почему-то на запад. А нам куда?"
+    scene scene_o1 with dissolve
+    dar "Text1"
     menu:
-        dar "Восток. А стрелка почему-то на запад. А нам куда?"
+        dar "Text2?"
 
         "Налево":
             $ rally_cross_quant += 0
@@ -340,10 +340,10 @@ class TestDuplicateMenuChoices:
         "Направо":
             $ rally_cross_quant += 1
 
-    scene 6ch_rallycross04 with dissolve
-    dar "Ого. Гляди-ка, [plr_nm] - Простоквашино. Заедем в гости к Дяде Федору?"
+    scene scene_o2 with dissolve
+    dar "Text3"
     menu:
-        dar "Ого. Гляди-ка, [plr_nm] - Простоквашино. Заедем в гости к Дяде Федору?"
+        dar Text4"
 
         "Налево":
             $ rally_cross_quant += 0

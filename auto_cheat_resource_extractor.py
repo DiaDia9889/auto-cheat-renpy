@@ -278,11 +278,49 @@ def decompile_rpyc_external(rpyc_path, unrpyc_path=None):
         write_discovery_log("[RPYC] Error: {}".format(e))
         return False
 
-def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
-    """Извлекает скрипты из .rpa архивов используя CLI-утилиту unrpa."""
+def decompile_all_rpyc_files(unrpyc_path):
+    """ЭТАП 2: Сканирует все .rpyc файлы в game/ и декомпилирует те, у которых нет .rpy."""
+    if not unrpyc_path:
+        write_discovery_log("[RPYC] No unrpyc available, skipping decompilation stage")
+        return 0
+    
+    decompiled_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
+    write_discovery_log("[RPYC] Scanning for .rpyc files to decompile...")
+    
+    for root, dirs, files in os.walk(CONFIG_GAMEDIR):
+        if 'tl' in root or 'cache' in root: continue
+        
+        for file in files:
+            if not file.endswith('.rpyc'): continue
+            
+            rpyc_path = os.path.join(root, file)
+            rel_path = os.path.relpath(rpyc_path, CONFIG_GAMEDIR)
+            
+            # Проверяем, есть ли уже .rpy файл
+            rpy_path = rpyc_path[:-1]  # .rpyc -> .rpy
+            if os.path.exists(rpy_path):
+                skipped_count += 1
+                write_discovery_log("[RPYC] Skipped (rpy exists): {}".format(rel_path))
+                continue
+            
+            # Декомпилируем
+            if decompile_rpyc_external(rpyc_path, unrpyc_path):
+                decompiled_count += 1
+            else:
+                failed_count += 1
+                write_discovery_log("[RPYC] Failed to decompile: {}".format(rel_path))
+    
+    write_discovery_log("[RPYC] Total: decompiled {}, skipped {}, failed {}".format(
+        decompiled_count, skipped_count, failed_count))
+    return decompiled_count
+
+def extract_rpa_scripts_only(unrpa_path):
+    """ЭТАП 1: Извлекает скрипты из .rpa архивов используя CLI-утилиту unrpa."""
     extracted_count = 0
     skipped_count = 0
-    decompiled_count = 0
     
     for root, dirs, files in os.walk(CONFIG_GAMEDIR):
         if 'tl' in root or 'cache' in root: continue
@@ -374,15 +412,6 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                             size = os.path.getsize(target_path)
                             write_discovery_log("[RPA] Extracted: {} ({} bytes)".format(rel_path, size))
                             extracted_count += 1
-                            
-                            # Проверяем, нужна ли декомпиляция для .rpyc
-                            if temp_file.endswith('.rpyc') and DECOMPILE_RPYC and unrpyc_path:
-                                rpy_target_path = target_path[:-1] # Путь к соседнему .rpy
-                                if os.path.exists(rpy_target_path):
-                                    write_discovery_log("[RPA] .rpy already exists for {}, skipping decompilation".format(rel_path))
-                                else:
-                                    if decompile_rpyc_external(target_path, unrpyc_path):
-                                        decompiled_count += 1
                         except Exception as e:
                             write_discovery_log("[RPA] Error copying {}: {}".format(rel_path, e))
                 
@@ -393,9 +422,7 @@ def extract_rpa_scripts_only(unrpa_path, unrpyc_path):
                 if os.path.exists(temp_extract_dir):
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
     
-    write_discovery_log("[RPA] Total: extracted {} scripts, skipped {}, decompiled {}".format(
-        extracted_count, skipped_count, decompiled_count))
-                    
+    write_discovery_log("[RPA] Total: extracted {} scripts, skipped {}".format(extracted_count, skipped_count))
     return extracted_count
 
 # =========================================================================
@@ -411,20 +438,37 @@ def main():
     
     unrpa_path, unrpyc_path = ensure_tools_installed()
     
-    if not unrpa_path:
-        write_discovery_log("[EXTRACTOR] Cannot extract .rpa archives without unrpa")
-        return
+    # ============================================================
+    # ЭТАП 1: Распаковка RPA архивов
+    # ============================================================
+    write_discovery_log("\n[STAGE 1] RPA EXTRACTION")
+    write_discovery_log("-"*30)
     
-    write_discovery_log("[EXTRACTOR] Using unrpa: {}".format(unrpa_path))
-    if unrpyc_path:
-        write_discovery_log("[EXTRACTOR] Using unrpyc: {}".format(unrpyc_path))
+    if unrpa_path:
+        write_discovery_log("[STAGE 1] Using unrpa: {}".format(unrpa_path))
+        extracted = extract_rpa_scripts_only(unrpa_path)
+        write_discovery_log("[STAGE 1] Completed. Extracted {} files.".format(extracted))
     else:
-        write_discovery_log("[EXTRACTOR] unrpyc not found, skipping decompilation.")
-        
-    extracted = extract_rpa_scripts_only(unrpa_path, unrpyc_path)
-    write_discovery_log("[EXTRACTOR] Extraction finished. Extracted {} files.".format(extracted))
+        write_discovery_log("[STAGE 1] unrpa not found, skipping RPA extraction.")
+        write_discovery_log("[STAGE 1] If .rpa archives exist, extraction will not be performed.")
     
-    write_discovery_log("="*50)
+    # ============================================================
+    # ЭТАП 2: Декомпиляция RPYC файлов
+    # ============================================================
+    write_discovery_log("\n[STAGE 2] RPYC DECOMPILATION")
+    write_discovery_log("-"*30)
+    
+    if DECOMPILE_RPYC:
+        if unrpyc_path:
+            write_discovery_log("[STAGE 2] Using unrpyc: {}".format(unrpyc_path))
+            decompiled = decompile_all_rpyc_files(unrpyc_path)
+            write_discovery_log("[STAGE 2] Completed. Decompiled {} files.".format(decompiled))
+        else:
+            write_discovery_log("[STAGE 2] unrpyc not found, skipping decompilation.")
+    else:
+        write_discovery_log("[STAGE 2] DECOMPILE_RPYC is disabled, skipping.")
+    
+    write_discovery_log("\n" + "="*50)
     write_discovery_log("RESOURCE EXTRACTOR SESSION FINISHED")
     write_discovery_log("="*50 + "\n")
 
